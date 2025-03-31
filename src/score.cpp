@@ -26,12 +26,12 @@
 
 namespace Stockfish {
 
-Score::Score(Value v, const Position& pos) {
+Score::Score(Value v, [[maybe_unused]] const Position& pos) {
     assert(-VALUE_INFINITE < v && v < VALUE_INFINITE);
 
     if (!is_decisive(v))
     {
-        score = InternalUnits{UCIEngine::to_cp(v, pos)};
+        score = InternalUnits{v};
     }
     else if (std::abs(v) <= VALUE_TB)
     {

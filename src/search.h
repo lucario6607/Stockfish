@@ -41,6 +41,7 @@
 #include "syzygy/tbprobe.h"
 #include "timeman.h"
 #include "types.h"
+#include "tt.h"
 
 namespace Stockfish {
 
@@ -67,14 +68,23 @@ struct Stack {
     int                         ply;
     Move                        currentMove;
     Move                        excludedMove;
+    Move                        excludedMove2;
     Value                       staticEval;
     int                         statScore;
     int                         moveCount;
     bool                        inCheck;
     bool                        ttPv;
+    bool                        isPv;
     bool                        ttHit;
     int                         cutoffCnt;
     int                         reduction;
+    int                         extension;
+    bool                        rule50Cutoff;
+    int                         depth;
+    TTData                      ttData;
+    Value                       alpha;
+    Value                       beta;
+    bool                        ttCutoffable;
 };
 
 
@@ -337,6 +347,8 @@ class Worker {
     RootMoves rootMoves;
     Depth     rootDepth, completedDepth;
     Value     rootDelta;
+
+    Stack* rootSS;
 
     size_t                    threadIdx;
     NumaReplicatedAccessToken numaAccessToken;
