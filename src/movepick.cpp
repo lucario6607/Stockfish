@@ -171,7 +171,7 @@ ExtMove* MovePicker::score(MoveList<Type>& ml) {
 
             // penalty for moving to a square threatened by a lesser piece
             // or bonus for escaping an attack by a lesser piece.
-            static constexpr int bonus[KING + 1] = {0, 0, 144, 144, 256, 517, 10000};
+            static constexpr std::array<int, KING + 1> bonus{0, 0, 144, 144, 256, 517, 10000};
             int v = threatByLesser[pt] & to ? -95 : 100 * bool(threatByLesser[pt] & from);
             m.value += bonus[pt] * v;
 
@@ -229,7 +229,7 @@ top:
     case QCAPTURE_INIT : {
         MoveList<CAPTURES> ml(pos);
 
-        cur = endBadCaptures = moves;
+        cur = endBadCaptures = &moves[0];
         endCur = endCaptures = score<CAPTURES>(ml);
 
         partial_insertion_sort(cur, endCur, std::numeric_limits<int>::min());
@@ -267,7 +267,7 @@ top:
             return *(cur - 1);
 
         // Prepare the pointers to loop over the bad captures
-        cur    = moves;
+        cur    = &moves[0];
         endCur = endBadCaptures;
 
         ++stage;
@@ -293,7 +293,7 @@ top:
     case EVASION_INIT : {
         MoveList<EVASIONS> ml(pos);
 
-        cur    = moves;
+        cur    = &moves[0];
         endCur = endGenerated = score<EVASIONS>(ml);
 
         partial_insertion_sort(cur, endCur, std::numeric_limits<int>::min());

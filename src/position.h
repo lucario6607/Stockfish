@@ -19,6 +19,7 @@
 #ifndef POSITION_H_INCLUDED
 #define POSITION_H_INCLUDED
 
+#include <array>
 #include <cassert>
 #include <deque>
 #include <iosfwd>
@@ -39,25 +40,25 @@ class TranspositionTable;
 struct StateInfo {
 
     // Copied when making a move
-    Key    materialKey;
-    Key    pawnKey;
-    Key    minorPieceKey;
-    Key    nonPawnKey[COLOR_NB];
-    Value  nonPawnMaterial[COLOR_NB];
-    int    castlingRights;
-    int    rule50;
-    int    pliesFromNull;
-    Square epSquare;
+    Key                         materialKey;
+    Key                         pawnKey;
+    Key                         minorPieceKey;
+    std::array<Key, COLOR_NB>   nonPawnKey;
+    std::array<Value, COLOR_NB> nonPawnMaterial;
+    int                         castlingRights;
+    int                         rule50;
+    int                         pliesFromNull;
+    Square                      epSquare;
 
     // Not copied when making a move (will be recomputed anyhow)
-    Key        key;
-    Bitboard   checkersBB;
-    StateInfo* previous;
-    Bitboard   blockersForKing[COLOR_NB];
-    Bitboard   pinners[COLOR_NB];
-    Bitboard   checkSquares[PIECE_TYPE_NB];
-    Piece      capturedPiece;
-    int        repetition;
+    Key                                 key;
+    Bitboard                            checkersBB;
+    StateInfo*                          previous;
+    std::array<Bitboard, COLOR_NB>      blockersForKing;
+    std::array<Bitboard, COLOR_NB>      pinners;
+    std::array<Bitboard, PIECE_TYPE_NB> checkSquares;
+    Piece                               capturedPiece;
+    int                                 repetition;
 };
 
 
@@ -91,11 +92,11 @@ class Position {
     Bitboard pieces(PieceTypes... pts) const;
     Bitboard pieces(Color c) const;
     template<typename... PieceTypes>
-    Bitboard     pieces(Color c, PieceTypes... pts) const;
-    Piece        piece_on(Square s) const;
-    const Piece* piece_array() const;
-    Square       ep_square() const;
-    bool         empty(Square s) const;
+    Bitboard                            pieces(Color c, PieceTypes... pts) const;
+    Piece                               piece_on(Square s) const;
+    const std::array<Piece, SQUARE_NB>& piece_array() const;
+    Square                              ep_square() const;
+    bool                                empty(Square s) const;
     template<PieceType Pt>
     int count(Color c) const;
     template<PieceType Pt>
@@ -187,17 +188,17 @@ class Position {
     Key  adjust_key50(Key k) const;
 
     // Data members
-    Piece      board[SQUARE_NB];
-    Bitboard   byTypeBB[PIECE_TYPE_NB];
-    Bitboard   byColorBB[COLOR_NB];
-    int        pieceCount[PIECE_NB];
-    int        castlingRightsMask[SQUARE_NB];
-    Square     castlingRookSquare[CASTLING_RIGHT_NB];
-    Bitboard   castlingPath[CASTLING_RIGHT_NB];
-    StateInfo* st;
-    int        gamePly;
-    Color      sideToMove;
-    bool       chess960;
+    std::array<Piece, SQUARE_NB>            board;
+    std::array<Bitboard, PIECE_TYPE_NB>     byTypeBB;
+    std::array<Bitboard, COLOR_NB>          byColorBB;
+    std::array<int, PIECE_NB>               pieceCount;
+    std::array<int, SQUARE_NB>              castlingRightsMask;
+    std::array<Square, CASTLING_RIGHT_NB>   castlingRookSquare;
+    std::array<Bitboard, CASTLING_RIGHT_NB> castlingPath;
+    StateInfo*                              st;
+    int                                     gamePly;
+    Color                                   sideToMove;
+    bool                                    chess960;
 };
 
 std::ostream& operator<<(std::ostream& os, const Position& pos);
@@ -209,7 +210,7 @@ inline Piece Position::piece_on(Square s) const {
     return board[s];
 }
 
-inline const Piece* Position::piece_array() const { return board; }
+inline const std::array<Piece, SQUARE_NB>& Position::piece_array() const { return board; }
 
 inline bool Position::empty(Square s) const { return piece_on(s) == NO_PIECE; }
 

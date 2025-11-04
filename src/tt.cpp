@@ -142,8 +142,8 @@ void TTWriter::write(
 static constexpr int ClusterSize = 3;
 
 struct Cluster {
-    TTEntry entry[ClusterSize];
-    char    padding[2];  // Pad to 32 bytes
+    std::array<TTEntry, ClusterSize> entry;
+    std::array<std::byte, 2>         padding;  // Pad to 32 bytes
 };
 
 static_assert(sizeof(Cluster) == 32, "Suboptimal Cluster size");

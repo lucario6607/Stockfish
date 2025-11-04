@@ -48,7 +48,7 @@ invert_permutation(const std::array<std::size_t, Len>& order) {
 // Divide a byte region of size TotalSize to chunks of size
 // BlockSize, and permute the blocks by a given order
 template<std::size_t BlockSize, typename T, std::size_t N, std::size_t OrderSize>
-void permute(T (&data)[N], const std::array<std::size_t, OrderSize>& order) {
+void permute(std::array<T, N>& data, const std::array<std::size_t, OrderSize>& order) {
     constexpr std::size_t TotalSize = N * sizeof(T);
 
     static_assert(TotalSize % (BlockSize * OrderSize) == 0,
@@ -58,7 +58,7 @@ void permute(T (&data)[N], const std::array<std::size_t, OrderSize>& order) {
 
     std::array<std::byte, ProcessChunkSize> buffer{};
 
-    std::byte* const bytes = reinterpret_cast<std::byte*>(data);
+    std::byte* const bytes = reinterpret_cast<std::byte*>(data.data());
 
     for (std::size_t i = 0; i < TotalSize; i += ProcessChunkSize)
     {
@@ -147,9 +147,9 @@ class FeatureTransformer {
     // Read network parameters
     bool read_parameters(std::istream& stream) {
 
-        read_leb_128<BiasType>(stream, biases, HalfDimensions);
-        read_leb_128<WeightType>(stream, weights, HalfDimensions * InputDimensions);
-        read_leb_128<PSQTWeightType>(stream, psqtWeights, PSQTBuckets * InputDimensions);
+        read_leb_128<BiasType>(stream, biases);
+        read_leb_128<WeightType>(stream, weights);
+        read_leb_128<PSQTWeightType>(stream, psqtWeights);
 
         permute_weights();
         scale_weights(true);
@@ -163,9 +163,9 @@ class FeatureTransformer {
         copy->unpermute_weights();
         copy->scale_weights(false);
 
-        write_leb_128<BiasType>(stream, copy->biases, HalfDimensions);
-        write_leb_128<WeightType>(stream, copy->weights, HalfDimensions * InputDimensions);
-        write_leb_128<PSQTWeightType>(stream, copy->psqtWeights, PSQTBuckets * InputDimensions);
+        write_leb_128<BiasType>(stream, copy->biases);
+        write_leb_128<WeightType>(stream, copy->weights);
+        write_leb_128<PSQTWeightType>(stream, copy->psqtWeights);
 
         return !stream.fail();
     }
@@ -182,16 +182,16 @@ class FeatureTransformer {
     // Convert input features
     std::int32_t transform(const Position&                           pos,
                            AccumulatorStack&                         accumulatorStack,
-                           AccumulatorCaches::Cache<HalfDimensions>* cache,
-                           OutputType*                               output,
+                           AccumulatorCaches::Cache<HalfDimensions>& cache,
+                           std::array<OutputType, BufferSize>&       output,
                            int                                       bucket) const {
 
         using namespace SIMD;
 
-        accumulatorStack.evaluate(pos, *this, *cache);
+        accumulatorStack.evaluate(pos, *this, cache);
         const auto& accumulatorState = accumulatorStack.latest();
 
-        const Color perspectives[2]  = {pos.side_to_move(), ~pos.side_to_move()};
+        const std::array<Color, COLOR_NB> perspectives{pos.side_to_move(), ~pos.side_to_move()};
         const auto& psqtAccumulation = (accumulatorState.acc<HalfDimensions>()).psqtAccumulation;
         const auto  psqt =
           (psqtAccumulation[perspectives[0]][bucket] - psqtAccumulation[perspectives[1]][bucket])
@@ -215,7 +215,7 @@ class FeatureTransformer {
             const vec_t* in0 = reinterpret_cast<const vec_t*>(&(accumulation[perspectives[p]][0]));
             const vec_t* in1 =
               reinterpret_cast<const vec_t*>(&(accumulation[perspectives[p]][HalfDimensions / 2]));
-            vec_t* out = reinterpret_cast<vec_t*>(output + offset);
+            vec_t* out = reinterpret_cast<vec_t*>(&output[offset]);
 
             // Per the NNUE architecture, here we want to multiply pairs of
             // clipped elements and divide the product by 128. To do this,
@@ -310,9 +310,9 @@ class FeatureTransformer {
         return psqt;
     }  // end of function transform()
 
-    alignas(CacheLineSize) BiasType biases[HalfDimensions];
-    alignas(CacheLineSize) WeightType weights[HalfDimensions * InputDimensions];
-    alignas(CacheLineSize) PSQTWeightType psqtWeights[InputDimensions * PSQTBuckets];
+    alignas(CacheLineSize) std::array<BiasType, HalfDimensions> biases;
+    alignas(CacheLineSize) std::array<WeightType, HalfDimensions * InputDimensions> weights;
+    alignas(CacheLineSize) std::array<PSQTWeightType, InputDimensions * PSQTBuckets> psqtWeights;
 };
 
 }  // namespace Stockfish::Eval::NNUE

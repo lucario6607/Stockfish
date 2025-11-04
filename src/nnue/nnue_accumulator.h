@@ -45,9 +45,9 @@ class FeatureTransformer;
 // Class that holds the result of affine transformation of input features
 template<IndexType Size>
 struct alignas(CacheLineSize) Accumulator {
-    std::int16_t               accumulation[COLOR_NB][Size];
-    std::int32_t               psqtAccumulation[COLOR_NB][PSQTBuckets];
-    std::array<bool, COLOR_NB> computed = {};
+    std::array<std::array<std::int16_t, Size>, COLOR_NB>        accumulation;
+    std::array<std::array<std::int32_t, PSQTBuckets>, COLOR_NB> psqtAccumulation;
+    std::array<bool, COLOR_NB>                                  computed = {};
 };
 
 
@@ -68,16 +68,16 @@ struct AccumulatorCaches {
     struct alignas(CacheLineSize) Cache {
 
         struct alignas(CacheLineSize) Entry {
-            BiasType       accumulation[Size];
-            PSQTWeightType psqtAccumulation[PSQTBuckets];
-            Piece          pieces[SQUARE_NB];
-            Bitboard       pieceBB;
+            std::array<BiasType, Size>              accumulation;
+            std::array<PSQTWeightType, PSQTBuckets> psqtAccumulation;
+            std::array<Piece, SQUARE_NB>            pieces;
+            Bitboard                                pieceBB;
 
             // To initialize a refresh entry, we set all its bitboards empty,
             // so we put the biases in the accumulation, without any weights on top
-            void clear(const BiasType* biases) {
+            void clear(const std::array<BiasType, Size>& biases) {
 
-                std::memcpy(accumulation, biases, sizeof(accumulation));
+                accumulation = biases;
                 std::memset((uint8_t*) this + offsetof(Entry, psqtAccumulation), 0,
                             sizeof(Entry) - offsetof(Entry, psqtAccumulation));
             }

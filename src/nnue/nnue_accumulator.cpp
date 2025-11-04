@@ -240,12 +240,13 @@ struct AccumulatorUpdateContext {
         };
 
         fused_row_reduce<Vec16Wrapper, Dimensions, ops...>(
-          (from.acc<Dimensions>()).accumulation[Perspective],
-          (to.acc<Dimensions>()).accumulation[Perspective], to_weight_vector(indices)...);
+          (from.acc<Dimensions>()).accumulation[Perspective].data(),
+          (to.acc<Dimensions>()).accumulation[Perspective].data(), to_weight_vector(indices)...);
 
         fused_row_reduce<Vec32Wrapper, PSQTBuckets, ops...>(
-          (from.acc<Dimensions>()).psqtAccumulation[Perspective],
-          (to.acc<Dimensions>()).psqtAccumulation[Perspective], to_psqt_weight_vector(indices)...);
+          (from.acc<Dimensions>()).psqtAccumulation[Perspective].data(),
+          (to.acc<Dimensions>()).psqtAccumulation[Perspective].data(),
+          to_psqt_weight_vector(indices)...);
     }
 };
 
@@ -362,14 +363,15 @@ void update_accumulator_incremental(
     (target_state.acc<TransformedFeatureDimensions>()).computed[Perspective] = true;
 }
 
-Bitboard get_changed_pieces(const Piece old[SQUARE_NB], const Piece new_[SQUARE_NB]) {
+Bitboard get_changed_pieces(const std::array<Piece, SQUARE_NB>& old,
+                            const std::array<Piece, SQUARE_NB>& new_) {
 #if defined(USE_AVX512) || defined(USE_AVX2)
     static_assert(sizeof(Piece) == 1);
     Bitboard same_bb = 0;
     for (int i = 0; i < 64; i += 32)
     {
-        const __m256i       old_v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(old + i));
-        const __m256i       new_v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(new_ + i));
+        const __m256i       old_v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&old[i]));
+        const __m256i       new_v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&new_[i]));
         const __m256i       cmp_equal  = _mm256_cmpeq_epi8(old_v, new_v);
         const std::uint32_t equal_mask = _mm256_movemask_epi8(cmp_equal);
         same_bb |= static_cast<Bitboard>(equal_mask) << i;
@@ -413,7 +415,7 @@ void update_accumulator_refresh_cache(const FeatureTransformer<Dimensions>& feat
     }
 
     entry.pieceBB = pos.pieces();
-    std::copy_n(pos.piece_array(), SQUARE_NB, entry.pieces);
+    entry.pieces  = pos.piece_array();
 
     auto& accumulator                 = accumulatorState.acc<Dimensions>();
     accumulator.computed[Perspective] = true;

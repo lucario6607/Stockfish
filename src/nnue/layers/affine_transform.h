@@ -139,7 +139,7 @@ class AffineTransform {
     static constexpr IndexType PaddedOutputDimensions =
       ceil_to_multiple<IndexType>(OutputDimensions, MaxSimdWidth);
 
-    using OutputBuffer = OutputType[PaddedOutputDimensions];
+    using OutputBuffer = std::array<OutputType, PaddedOutputDimensions>;
 
     // Hash value embedded in the evaluation file
     static constexpr std::uint32_t get_hash_value(std::uint32_t prevHash) {
@@ -165,7 +165,7 @@ class AffineTransform {
 
     // Read network parameters
     bool read_parameters(std::istream& stream) {
-        read_little_endian<BiasType>(stream, biases, OutputDimensions);
+        read_little_endian<BiasType>(stream, biases);
         for (IndexType i = 0; i < OutputDimensions * PaddedInputDimensions; ++i)
             weights[get_weight_index(i)] = read_little_endian<WeightType>(stream);
 
@@ -174,7 +174,7 @@ class AffineTransform {
 
     // Write network parameters
     bool write_parameters(std::ostream& stream) const {
-        write_little_endian<BiasType>(stream, biases, OutputDimensions);
+        write_little_endian<BiasType>(stream, biases);
 
         for (IndexType i = 0; i < OutputDimensions * PaddedInputDimensions; ++i)
             write_little_endian<WeightType>(stream, weights[get_weight_index(i)]);
@@ -224,8 +224,8 @@ class AffineTransform {
             constexpr IndexType NumChunks = ceil_to_multiple<IndexType>(InputDimensions, 8) / 4;
             constexpr IndexType NumRegs   = OutputDimensions / OutputSimdWidth;
 
-            const auto   input32 = reinterpret_cast<const std::int32_t*>(input);
-            const vec_t* biasvec = reinterpret_cast<const vec_t*>(biases);
+            const auto   input32 = reinterpret_cast<const std::int32_t*>(&input[0]);
+            const vec_t* biasvec = reinterpret_cast<const vec_t*>(&biases[0]);
             vec_t        acc[NumRegs];
             for (IndexType k = 0; k < NumRegs; ++k)
                 acc[k] = biasvec[k];
@@ -240,7 +240,7 @@ class AffineTransform {
                     vec_add_dpbusd_32(acc[k], in0, col0[k]);
             }
 
-            vec_t* outptr = reinterpret_cast<vec_t*>(output);
+            vec_t* outptr = reinterpret_cast<vec_t*>(&output[0]);
             for (IndexType k = 0; k < NumRegs; ++k)
                 outptr[k] = acc[k];
 
@@ -302,8 +302,8 @@ class AffineTransform {
     using BiasType   = OutputType;
     using WeightType = std::int8_t;
 
-    alignas(CacheLineSize) BiasType biases[OutputDimensions];
-    alignas(CacheLineSize) WeightType weights[OutputDimensions * PaddedInputDimensions];
+    alignas(CacheLineSize) std::array<BiasType, OutputDimensions> biases;
+    alignas(CacheLineSize) std::array<WeightType, OutputDimensions * PaddedInputDimensions> weights;
 };
 
 }  // namespace Stockfish::Eval::NNUE::Layers

@@ -135,13 +135,13 @@ class ValueList {
    public:
     std::size_t size() const { return size_; }
     void        push_back(const T& value) { values_[size_++] = value; }
-    const T*    begin() const { return values_; }
-    const T*    end() const { return values_ + size_; }
+    const T*    begin() const { return values_.begin(); }
+    const T*    end() const { return begin() + size_; }
     const T&    operator[](int index) const { return values_[index]; }
 
    private:
-    T           values_[MaxSize];
-    std::size_t size_ = 0;
+    std::array<T, MaxSize> values_;
+    std::size_t            size_ = 0;
 };
 
 
@@ -324,7 +324,7 @@ class FixedString {
         size_t len = std::strlen(str);
         if (len > Capacity)
             std::terminate();
-        std::memcpy(data_, str, len);
+        std::memcpy(data_.data(), str, len);
         length_        = len;
         data_[length_] = '\0';
     }
@@ -332,7 +332,7 @@ class FixedString {
     FixedString(const std::string& str) {
         if (str.size() > Capacity)
             std::terminate();
-        std::memcpy(data_, str.data(), str.size());
+        std::memcpy(data_.data(), str.data(), str.size());
         length_        = str.size();
         data_[length_] = '\0';
     }
@@ -359,18 +359,18 @@ class FixedString {
 
     FixedString& operator+=(const FixedString& other) { return (*this += other.c_str()); }
 
-    operator std::string() const { return std::string(data_, length_); }
+    operator std::string() const { return std::string(data_.data(), length_); }
 
-    operator std::string_view() const { return std::string_view(data_, length_); }
+    operator std::string_view() const { return std::string_view(data_.data(), length_); }
 
     template<typename T>
     bool operator==(const T& other) const noexcept {
-        return (std::string_view) (*this) == other;
+        return (std::string_view)(*this) == other;
     }
 
     template<typename T>
     bool operator!=(const T& other) const noexcept {
-        return (std::string_view) (*this) != other;
+        return (std::string_view)(*this) != other;
     }
 
     void clear() {
@@ -379,8 +379,8 @@ class FixedString {
     }
 
    private:
-    char        data_[Capacity + 1];  // +1 for null terminator
-    std::size_t length_;
+    std::array<char, Capacity + 1> data_;  // +1 for null terminator
+    std::size_t                    length_;
 };
 
 struct CommandLine {
