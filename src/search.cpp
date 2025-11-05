@@ -607,8 +607,8 @@ Value Search::Worker::search(
     assert(0 < depth && depth < MAX_PLY);
     assert(!(PvNode && cutNode));
 
-    Move      pv[MAX_PLY + 1];
-    StateInfo st;
+    std::array<Move, MAX_PLY + 1> pv;
+    StateInfo                     st;
 
     Key   posKey;
     Move  move, excludedMove, bestMove;
@@ -1251,7 +1251,7 @@ moves_loop:  // When in check, search starts here
         // otherwise let the parent node fail low with value <= alpha and try another move.
         if (PvNode && (moveCount == 1 || value > alpha))
         {
-            (ss + 1)->pv    = pv;
+            (ss + 1)->pv    = &pv[0];
             (ss + 1)->pv[0] = Move::none();
 
             // Extend move from transposition table if we are about to dive into qsearch.
@@ -1485,8 +1485,8 @@ Value Search::Worker::qsearch(Position& pos, Stack* ss, Value alpha, Value beta)
             return alpha;
     }
 
-    Move      pv[MAX_PLY + 1];
-    StateInfo st;
+    std::array<Move, MAX_PLY + 1> pv;
+    StateInfo                     st;
 
     Key   posKey;
     Move  move, bestMove;
@@ -1497,7 +1497,7 @@ Value Search::Worker::qsearch(Position& pos, Stack* ss, Value alpha, Value beta)
     // Step 1. Initialize node
     if (PvNode)
     {
-        (ss + 1)->pv = pv;
+        (ss + 1)->pv = &pv[0];
         ss->pv[0]    = Move::none();
     }
 

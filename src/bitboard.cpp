@@ -150,9 +150,9 @@ void init_magics(PieceType                                    pt,
 
 #ifndef USE_PEXT
     // Optimal PRNG seeds to pick the correct magics in the shortest time
-    std::array<std::array<int, RANK_NB>, 2> seeds = {
-      {8977, 44560, 54343, 38998, 5731, 95205, 104912, 17020},
-      {728, 10316, 55013, 32803, 12281, 15100, 16645, 255}};
+    std::array<std::array<int, RANK_NB>, 2> seeds{
+      {{8977, 44560, 54343, 38998, 5731, 95205, 104912, 17020},
+       {728, 10316, 55013, 32803, 12281, 15100, 16645, 255}}};
 
     std::array<Bitboard, 4096> occupancy;
     std::array<int, 4096>      epoch{};
