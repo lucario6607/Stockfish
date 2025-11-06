@@ -18,7 +18,6 @@
 
 #include "nnue_accumulator.h"
 
-#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <type_traits>
