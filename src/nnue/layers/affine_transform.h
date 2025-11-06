@@ -48,20 +48,21 @@ namespace Stockfish::Eval::NNUE::Layers {
 #ifndef ENABLE_SEQ_OPT
 
 template<IndexType InputDimensions, IndexType PaddedInputDimensions, IndexType OutputDimensions>
-static void affine_transform_non_ssse3(std::int32_t*       output,
-                                       const std::int8_t*  weights,
-                                       const std::int32_t* biases,
-                                       const std::uint8_t* input) {
+static void affine_transform_non_ssse3(
+  std::int32_t*                                                            output,
+  const std::array<std::int8_t, OutputDimensions * PaddedInputDimensions>& weights,
+  const std::array<std::int32_t, OutputDimensions>&                        biases,
+  const std::uint8_t*                                                      input) {
     #if defined(USE_SSE2) || defined(USE_NEON)
         #if defined(USE_SSE2)
     // At least a multiple of 16, with SSE2.
     constexpr IndexType NumChunks   = ceil_to_multiple<IndexType>(InputDimensions, 16) / 16;
     const __m128i       Zeros       = _mm_setzero_si128();
-    const auto          inputVector = reinterpret_cast<const __m128i*>(input);
+    const auto          inputVector = reinterpret_cast<const __m128i*>(&input[0]);
 
         #elif defined(USE_NEON)
     constexpr IndexType NumChunks   = ceil_to_multiple<IndexType>(InputDimensions, 16) / 16;
-    const auto          inputVector = reinterpret_cast<const int8x8_t*>(input);
+    const auto          inputVector = reinterpret_cast<const int8x8_t*>(&input[0]);
         #endif
 
     for (IndexType i = 0; i < OutputDimensions; ++i)
@@ -107,7 +108,7 @@ static void affine_transform_non_ssse3(std::int32_t*       output,
         #endif
     }
     #else
-    std::memcpy(output, biases, sizeof(std::int32_t) * OutputDimensions);
+    std::memcpy(&output[0], &biases[0], sizeof(std::int32_t) * OutputDimensions);
 
     // Traverse weights in transpose order to take advantage of input sparsity
     for (IndexType i = 0; i < InputDimensions; ++i)
