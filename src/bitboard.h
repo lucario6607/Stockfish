@@ -259,7 +259,7 @@ inline int popcount(Bitboard b) {
 #ifndef USE_POPCNT
 
     std::uint16_t indices[4];
-    std::memcpy(indices, &b, sizeof(b));
+    std::memcpy(&indices[0], &b, sizeof(b));
     return PopCnt16[indices[0]] + PopCnt16[indices[1]] + PopCnt16[indices[2]]
          + PopCnt16[indices[3]];
 
