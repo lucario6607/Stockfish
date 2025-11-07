@@ -164,6 +164,19 @@ template<typename To, typename From>
 constexpr bool is_strictly_assignable_v =
   std::is_assignable_v<To&, From> && (std::is_same_v<To, From> || !std::is_convertible_v<From, To>);
 
+template<typename T, std::size_t Size, std::size_t... Sizes>
+struct MultiStdArrayDef {
+    using type = std::array<typename MultiStdArrayDef<T, Sizes...>::type, Size>;
+};
+
+template<typename T, std::size_t Size>
+struct MultiStdArrayDef<T, Size> {
+    using type = std::array<T, Size>;
+};
+
+template<typename T, std::size_t Size, std::size_t... Sizes>
+using MultiStdArray = typename MultiStdArrayDef<T, Size, Sizes...>::type;
+
 }
 
 // MultiArray is a generic N-dimensional array.
@@ -173,9 +186,9 @@ class MultiArray {
     using ChildType = typename Detail::MultiArrayHelper<T, Size, Sizes...>::ChildType;
     using ArrayType = std::array<ChildType, Size>;
 
+   public:
     ArrayType data_;
 
-   public:
     using value_type             = typename ArrayType::value_type;
     using size_type              = typename ArrayType::size_type;
     using difference_type        = typename ArrayType::difference_type;
@@ -245,6 +258,12 @@ class MultiArray {
              typename              = typename std::enable_if_t<NoExtraDimension, bool>>
     constexpr operator const std::array<T, Size>&() const noexcept {
         return data_;
+    }
+
+    constexpr MultiArray& operator=(const Detail::MultiStdArray<T, Size, Sizes...>& other) {
+        for (std::size_t i = 0; i < Size; i++)
+            data_[i] = other[i];
+        return *this;
     }
 };
 
