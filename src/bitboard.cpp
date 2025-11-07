@@ -20,20 +20,21 @@
 
 #include <algorithm>
 #include <bitset>
+#include <cstdint>
 #include <initializer_list>
 
 #include "misc.h"
 
 namespace Stockfish {
 
-std::array<uint8_t, 1 << 16>                          PopCnt16;
-std::array<std::array<uint8_t, SQUARE_NB>, SQUARE_NB> SquareDistance;
+std::array<uint8_t, 1 << 16>              PopCnt16;
+MultiArray<uint8_t, SQUARE_NB, SQUARE_NB> SquareDistance;
 
-std::array<std::array<Bitboard, SQUARE_NB>, SQUARE_NB>     BetweenBB;
-std::array<std::array<Bitboard, SQUARE_NB>, SQUARE_NB>     LineBB;
-std::array<std::array<Bitboard, SQUARE_NB>, PIECE_TYPE_NB> PseudoAttacks;
+MultiArray<Bitboard, SQUARE_NB, SQUARE_NB>     BetweenBB;
+MultiArray<Bitboard, SQUARE_NB, SQUARE_NB>     LineBB;
+MultiArray<Bitboard, PIECE_TYPE_NB, SQUARE_NB> PseudoAttacks;
 
-alignas(64) std::array<std::array<Magic, 2>, SQUARE_NB> Magics;
+alignas(64) MultiArray<Magic, SQUARE_NB, 2> Magics;
 
 namespace {
 
@@ -41,9 +42,9 @@ std::array<Bitboard, 0x19000> RookTable;    // To store rook attacks
 std::array<Bitboard, 0x1480>  BishopTable;  // To store bishop attacks
 
 template<std::size_t Size>
-void init_magics(PieceType                                    pt,
-                 std::array<Bitboard, Size>&                  table,
-                 std::array<std::array<Magic, 2>, SQUARE_NB>& magics);
+void init_magics(PieceType                        pt,
+                 std::array<Bitboard, Size>&      table,
+                 MultiArray<Magic, SQUARE_NB, 2>& magics);
 
 // Returns the bitboard of target square for the given step
 // from the given square. If the step is off the board, returns empty bitboard.
@@ -144,15 +145,14 @@ Bitboard sliding_attack(PieceType pt, Square sq, Bitboard occupied) {
 // https://www.chessprogramming.org/Magic_Bitboards. In particular, here we use
 // the so called "fancy" approach.
 template<std::size_t Size>
-void init_magics(PieceType                                    pt,
-                 std::array<Bitboard, Size>&                  table,
-                 std::array<std::array<Magic, 2>, SQUARE_NB>& magics) {
+void init_magics(PieceType                        pt,
+                 std::array<Bitboard, Size>&      table,
+                 MultiArray<Magic, SQUARE_NB, 2>& magics) {
 
 #ifndef USE_PEXT
     // Optimal PRNG seeds to pick the correct magics in the shortest time
-    std::array<std::array<int, RANK_NB>, 2> seeds{
-      {{8977, 44560, 54343, 38998, 5731, 95205, 104912, 17020},
-       {728, 10316, 55013, 32803, 12281, 15100, 16645, 255}}};
+    MultiArray<int, 2, RANK_NB> seeds{{{8977, 44560, 54343, 38998, 5731, 95205, 104912, 17020},
+                                       {728, 10316, 55013, 32803, 12281, 15100, 16645, 255}}};
 
     std::array<Bitboard, 4096> occupancy;
     std::array<int, 4096>      epoch{};

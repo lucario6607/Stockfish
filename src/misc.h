@@ -172,6 +172,7 @@ template<typename T, std::size_t Size, std::size_t... Sizes>
 class MultiArray {
     using ChildType = typename Detail::MultiArrayHelper<T, Size, Sizes...>::ChildType;
     using ArrayType = std::array<ChildType, Size>;
+
     ArrayType data_;
 
    public:
@@ -233,6 +234,18 @@ class MultiArray {
     }
 
     constexpr void swap(MultiArray<T, Size, Sizes...>& other) noexcept { data_.swap(other.data_); }
+
+    template<bool NoExtraDimension = sizeof...(Sizes) == 0,
+             typename              = typename std::enable_if_t<NoExtraDimension, bool>>
+    constexpr operator std::array<T, Size>&() noexcept {
+        return data_;
+    }
+
+    template<bool NoExtraDimension = sizeof...(Sizes) == 0,
+             typename              = typename std::enable_if_t<NoExtraDimension, bool>>
+    constexpr operator const std::array<T, Size>&() const noexcept {
+        return data_;
+    }
 };
 
 

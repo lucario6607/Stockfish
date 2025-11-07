@@ -28,6 +28,7 @@
 #include <cstdlib>
 #include <string>
 
+#include "misc.h"
 #include "types.h"
 
 namespace Stockfish {
@@ -57,12 +58,12 @@ constexpr Bitboard Rank6BB = Rank1BB << (8 * 5);
 constexpr Bitboard Rank7BB = Rank1BB << (8 * 6);
 constexpr Bitboard Rank8BB = Rank1BB << (8 * 7);
 
-extern std::array<uint8_t, 1 << 16>                          PopCnt16;
-extern std::array<std::array<uint8_t, SQUARE_NB>, SQUARE_NB> SquareDistance;
+extern std::array<uint8_t, 1 << 16>              PopCnt16;
+extern MultiArray<uint8_t, SQUARE_NB, SQUARE_NB> SquareDistance;
 
-extern std::array<std::array<Bitboard, SQUARE_NB>, SQUARE_NB>     BetweenBB;
-extern std::array<std::array<Bitboard, SQUARE_NB>, SQUARE_NB>     LineBB;
-extern std::array<std::array<Bitboard, SQUARE_NB>, PIECE_TYPE_NB> PseudoAttacks;
+extern MultiArray<Bitboard, SQUARE_NB, SQUARE_NB>     BetweenBB;
+extern MultiArray<Bitboard, SQUARE_NB, SQUARE_NB>     LineBB;
+extern MultiArray<Bitboard, PIECE_TYPE_NB, SQUARE_NB> PseudoAttacks;
 
 
 // Magic holds all magic bitboards relevant data for a single square
@@ -92,7 +93,7 @@ struct Magic {
     Bitboard attacks_bb(Bitboard occupied) const { return attacks[index(occupied)]; }
 };
 
-extern std::array<std::array<Magic, 2>, SQUARE_NB> Magics;
+extern MultiArray<Magic, SQUARE_NB, 2> Magics;
 
 constexpr Bitboard square_bb(Square s) {
     assert(is_ok(s));

@@ -45,9 +45,9 @@ class FeatureTransformer;
 // Class that holds the result of affine transformation of input features
 template<IndexType Size>
 struct alignas(CacheLineSize) Accumulator {
-    std::array<std::array<std::int16_t, Size>, COLOR_NB>        accumulation;
-    std::array<std::array<std::int32_t, PSQTBuckets>, COLOR_NB> psqtAccumulation;
-    std::array<bool, COLOR_NB>                                  computed = {};
+    MultiArray<std::int16_t, COLOR_NB, Size>        accumulation;
+    MultiArray<std::int32_t, COLOR_NB, PSQTBuckets> psqtAccumulation;
+    std::array<bool, COLOR_NB>                      computed = {};
 };
 
 
@@ -92,7 +92,7 @@ struct AccumulatorCaches {
 
         std::array<Entry, COLOR_NB>& operator[](Square sq) { return entries[sq]; }
 
-        std::array<std::array<Entry, COLOR_NB>, SQUARE_NB> entries;
+        MultiArray<Entry, SQUARE_NB, COLOR_NB> entries;
     };
 
     template<typename Networks>

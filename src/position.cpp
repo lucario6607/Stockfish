@@ -43,10 +43,10 @@ namespace Stockfish {
 
 namespace Zobrist {
 
-std::array<std::array<Key, SQUARE_NB>, PIECE_NB> psq;
-std::array<Key, FILE_NB>                         enpassant;
-std::array<Key, CASTLING_RIGHT_NB>               castling;
-Key                                              side, noPawns;
+MultiArray<Key, PIECE_NB, SQUARE_NB> psq;
+std::array<Key, FILE_NB>             enpassant;
+std::array<Key, CASTLING_RIGHT_NB>   castling;
+Key                                  side, noPawns;
 }
 
 namespace {

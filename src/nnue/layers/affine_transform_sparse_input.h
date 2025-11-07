@@ -50,7 +50,7 @@ constexpr int constexpr_lsb(uint64_t bb) {
 
 alignas(CacheLineSize) static constexpr struct OffsetIndices {
 
-    std::array<std::array<std::uint16_t, 8>, 256> offset_indices;
+    MultiArray<std::uint16_t, 256, 8> offset_indices;
 
     constexpr OffsetIndices() :
         offset_indices() {
