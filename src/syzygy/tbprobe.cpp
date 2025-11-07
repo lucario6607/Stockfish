@@ -19,7 +19,6 @@
 #include "tbprobe.h"
 
 #include <algorithm>
-#include <array>
 #include <atomic>
 #include <cassert>
 #include <cstdint>

@@ -26,6 +26,7 @@
 #include <cstdint>
 #include <cstring>
 
+#include "../misc.h"
 #include "../types.h"
 #include "nnue_architecture.h"
 #include "nnue_common.h"
