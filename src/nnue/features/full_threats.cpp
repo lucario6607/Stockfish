@@ -165,27 +165,6 @@ void FullThreats::append_active_indices(const Position& pos, IndexList& active) 
     Square   ksq      = pos.square<KING>(Perspective);
     Bitboard occupied = pos.pieces();
 
-    // Helper lambda to check if we should skip this threat
-    auto should_skip_threat = [ksq](Piece attacker, Square from, Square to, Piece attacked) {
-        // Match what make_index does
-        Piece check_attacker = (Perspective == BLACK) ? ~attacker : attacker;
-        Piece check_attacked = (Perspective == BLACK) ? ~attacked : attacked;
-        auto piecePairData = index_lut1[check_attacker][check_attacked];
-        
-        uint8_t exclusion_info = piecePairData.excluded_pair_info();
-        if (exclusion_info & 2)  // Always excluded
-            return true;
-            
-        if (exclusion_info & 1)  // Semi-excluded, check ordering
-        {
-            Square oriented_from = (Square)(int(from) ^ OrientTBL[Perspective][ksq]);
-            Square oriented_to = (Square)(int(to) ^ OrientTBL[Perspective][ksq]);
-            if (static_cast<uint8_t>(oriented_from) < static_cast<uint8_t>(oriented_to))
-                return true;
-        }
-        return false;
-    };
-
     for (Color color : {WHITE, BLACK})
     {
         for (PieceType pt = PAWN; pt <= KING; ++pt)
@@ -208,13 +187,10 @@ void FullThreats::append_active_indices(const Position& pos, IndexList& active) 
                     Square    to       = pop_lsb(attacks_left);
                     Square    from     = to - right;
                     Piece     attacked = pos.piece_on(to);
-                    
-                    if (!should_skip_threat(attacker, from, to, attacked))
-                    {
-                        IndexType index = make_index<Perspective>(attacker, from, to, attacked, ksq);
-                        if (index < Dimensions)
-                            active.push_back(index);
-                    }
+                    IndexType index    = make_index<Perspective>(attacker, from, to, attacked, ksq);
+
+                    if (index < Dimensions)
+                        active.push_back(index);
                 }
 
                 while (attacks_right)
@@ -222,13 +198,10 @@ void FullThreats::append_active_indices(const Position& pos, IndexList& active) 
                     Square    to       = pop_lsb(attacks_right);
                     Square    from     = to - left;
                     Piece     attacked = pos.piece_on(to);
-                    
-                    if (!should_skip_threat(attacker, from, to, attacked))
-                    {
-                        IndexType index = make_index<Perspective>(attacker, from, to, attacked, ksq);
-                        if (index < Dimensions)
-                            active.push_back(index);
-                    }
+                    IndexType index    = make_index<Perspective>(attacker, from, to, attacked, ksq);
+
+                    if (index < Dimensions)
+                        active.push_back(index);
                 }
             }
             else
@@ -236,19 +209,17 @@ void FullThreats::append_active_indices(const Position& pos, IndexList& active) 
                 while (bb)
                 {
                     Square   from    = pop_lsb(bb);
-                    Bitboard attacks = (attacks_bb(pt, from, occupied)) & occupied;
+                    Bitboard attacks = (attacks_bb(pt, from, occupied)) &occupied;
 
                     while (attacks)
                     {
                         Square    to       = pop_lsb(attacks);
                         Piece     attacked = pos.piece_on(to);
-                        
-                        if (!should_skip_threat(attacker, from, to, attacked))
-                        {
-                            IndexType index = make_index<Perspective>(attacker, from, to, attacked, ksq);
-                            if (index < Dimensions)
-                                active.push_back(index);
-                        }
+                        IndexType index =
+                          make_index<Perspective>(attacker, from, to, attacked, ksq);
+
+                        if (index < Dimensions)
+                            active.push_back(index);
                     }
                 }
             }
