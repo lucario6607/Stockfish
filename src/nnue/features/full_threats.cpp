@@ -162,8 +162,25 @@ template<Color Perspective>
 void FullThreats::append_active_indices(const Position& pos, IndexList& active) {
     static constexpr Color order[2][2] = {{WHITE, BLACK}, {BLACK, WHITE}};
 
-    Square   ksq      = pos.square<KING>(Perspective);
-    Bitboard occupied = pos.pieces();
+    const Square   ksq      = pos.square<KING>(Perspective);
+    const Bitboard occupied = pos.pieces();
+
+    auto is_excluded = [ksq](const Piece attacker_orig, const Square from, const Square to, const Piece attacked_orig) -> bool {
+        Piece attacker = attacker_orig;
+        Piece attacked = attacked_orig;
+
+        if constexpr (Perspective == BLACK)
+        {
+            attacker = ~attacker;
+            attacked = ~attacked;
+        }
+
+        const uint8_t info = index_lut1[attacker][attacked].excluded_pair_info();
+
+        return (info & 2) ||
+               ((info & 1) &&
+                ((int(from) ^ OrientTBL[Perspective][ksq]) < (int(to) ^ OrientTBL[Perspective][ksq])));
+    };
 
     for (Color color : {WHITE, BLACK})
     {
@@ -184,22 +201,28 @@ void FullThreats::append_active_indices(const Position& pos, IndexList& active) 
 
                 while (attacks_left)
                 {
-                    Square    to       = pop_lsb(attacks_left);
-                    Square    from     = to - right;
-                    Piece     attacked = pos.piece_on(to);
-                    IndexType index    = make_index<Perspective>(attacker, from, to, attacked, ksq);
+                    Square to       = pop_lsb(attacks_left);
+                    Square from     = to - right;
+                    Piece  attacked = pos.piece_on(to);
 
+                    if (is_excluded(attacker, from, to, attacked))
+                        continue;
+
+                    IndexType index = make_index<Perspective>(attacker, from, to, attacked, ksq);
                     if (index < Dimensions)
                         active.push_back(index);
                 }
 
                 while (attacks_right)
                 {
-                    Square    to       = pop_lsb(attacks_right);
-                    Square    from     = to - left;
-                    Piece     attacked = pos.piece_on(to);
-                    IndexType index    = make_index<Perspective>(attacker, from, to, attacked, ksq);
+                    Square to       = pop_lsb(attacks_right);
+                    Square from     = to - left;
+                    Piece  attacked = pos.piece_on(to);
 
+                    if (is_excluded(attacker, from, to, attacked))
+                        continue;
+                    
+                    IndexType index = make_index<Perspective>(attacker, from, to, attacked, ksq);
                     if (index < Dimensions)
                         active.push_back(index);
                 }
@@ -213,11 +236,13 @@ void FullThreats::append_active_indices(const Position& pos, IndexList& active) 
 
                     while (attacks)
                     {
-                        Square    to       = pop_lsb(attacks);
-                        Piece     attacked = pos.piece_on(to);
-                        IndexType index =
-                          make_index<Perspective>(attacker, from, to, attacked, ksq);
+                        Square to       = pop_lsb(attacks);
+                        Piece  attacked = pos.piece_on(to);
 
+                        if (is_excluded(attacker, from, to, attacked))
+                            continue;
+
+                        IndexType index = make_index<Perspective>(attacker, from, to, attacked, ksq);
                         if (index < Dimensions)
                             active.push_back(index);
                     }
