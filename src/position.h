@@ -25,7 +25,6 @@
 #include <iosfwd>
 #include <memory>
 #include <string>
-#include <iostream>
 
 #include "bitboard.h"
 #include "types.h"
@@ -33,9 +32,6 @@
 namespace Stockfish {
 
 class TranspositionTable;
-namespace Eval::NNUE::Features {
-class FullThreats;
-}
 
 // StateInfo struct stores information needed to restore a Position object to
 // its previous state when we retract a move. Whenever a move is made on the

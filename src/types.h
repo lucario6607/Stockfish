@@ -298,7 +298,7 @@ struct DirtyThreat {
         data = (add << 28) | (pc << 20) | (threatened_pc << 16) | (threatened_sq << 8) | (pc_sq);
     }
 
-    Piece  pc() const { return static_cast<Piece>(data >> 20 & 0xff); }
+    Piece  pc() const { return static_cast<Piece>(data >> 20 & 0xf); }
     Piece  threatened_pc() const { return static_cast<Piece>(data >> 16 & 0xf); }
     Square threatened_sq() const { return static_cast<Square>(data >> 8 & 0xff); }
     Square pc_sq() const { return static_cast<Square>(data & 0xff); }
@@ -312,7 +312,13 @@ struct DirtyThreat {
     uint32_t data;
 };
 
-using DirtyThreatList = ValueList<DirtyThreat, 64>;  // 32 is not enough, find better upper bound?
+using DirtyThreatList = ValueList<DirtyThreat, 64>;
+/*
+A piece can be involved in at most 16 threat features, or 9 if it lies on the edge of the board.
+This implies that a non-castling move can change at most 16 * 3 = 48 features.
+A castling move can change at most 9 * 4 = 36 features. 
+Thus, 48 should work as an upper bound, but we use 64 to be safe.
+*/
 
 struct DirtyThreats {
     DirtyThreatList list;

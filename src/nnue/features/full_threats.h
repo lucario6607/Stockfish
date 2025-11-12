@@ -25,7 +25,6 @@
 #include "../nnue_common.h"
 
 namespace Stockfish {
-struct StateInfo;
 class Position;
 }
 
@@ -81,18 +80,14 @@ class FullThreats {
     struct FusedUpdateData {
         Bitboard dp2removedOriginBoard = 0;
         Bitboard dp2removedTargetBoard = 0;
-        Bitboard dp2fromBoard          = 0;
 
         Square dp2removed;
-        Square dp2from;
     };
 
     // Maximum number of simultaneously active features.
     static constexpr IndexType MaxActiveDimensions = 128;
     using IndexList                                = ValueList<IndexType, MaxActiveDimensions>;
     using DiffType                                 = DirtyThreats;
-
-    FullThreats() { init_threat_offsets(); };
 
     template<Color Perspective>
     static IndexType make_index(Piece attkr, Square from, Square to, Piece attkd, Square ksq);
