@@ -949,7 +949,7 @@ Value Search::Worker::search(
 
             // If the qsearch held, perform the regular search
             if (value >= probCutBeta && probCutDepth > 0)
-                value = -search<NonPV>(pos, ss + 1, -probCutBeta, -probCutBeta + 1, probCutDepth,
+                value = -search<NonPV>(pos, ss + 1, -probCutBeta - 1, -probCutBeta, probCutDepth,
                                        !cutNode);
 
             undo_move(pos, move);
