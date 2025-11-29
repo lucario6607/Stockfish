@@ -942,6 +942,14 @@ Value Search::Worker::search(
 
             assert(pos.capture_stage(move));
 
+            // Skip captures with very negative history, except for the TT move
+            if (move != ttData.move)
+            {
+                int captHist = captureHistory[pos.moved_piece(move)][move.to_sq()][type_of(pos.piece_on(move.to_sq()))];
+                if (captHist < -4096 * depth)
+                    continue;
+            }
+
             do_move(pos, move, st, ss);
 
             // Perform a preliminary qsearch to verify that the move holds
