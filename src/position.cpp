@@ -1153,8 +1153,10 @@ void Position::update_piece_threats(Piece               pc,
     // Remove attackers that are not used by NNUE
     if (type_of(pc) == QUEEN)
         incoming_threats &= pieces(KNIGHT);
-    else if (type_of(pc) == BISHOP || type_of(pc) == ROOK || type_of(pc) == KING)
+    else if (type_of(pc) == BISHOP)
         incoming_threats &= ~pieces(PAWN);
+    else if (type_of(pc) == KING)
+        incoming_threats &= ~pieces(PAWN, KING);
 
     Bitboard valid_sliders = sliders;
     if (type_of(pc) == QUEEN)
