@@ -230,14 +230,16 @@ class AffineTransform {
             for (IndexType k = 0; k < NumRegs; ++k)
                 acc[k] = biasvec[k];
 
+            auto col0 = reinterpret_cast<const vec_t*>(weights);
+
             for (IndexType i = 0; i < NumChunks; ++i)
             {
                 const vec_t in0 = vec_set_32(input32[i]);
-                const auto  col0 =
-                  reinterpret_cast<const vec_t*>(&weights[i * OutputDimensions * 4]);
 
                 for (IndexType k = 0; k < NumRegs; ++k)
                     vec_add_dpbusd_32(acc[k], in0, col0[k]);
+
+                col0 += NumRegs;
             }
 
             vec_t* outptr = reinterpret_cast<vec_t*>(output);
