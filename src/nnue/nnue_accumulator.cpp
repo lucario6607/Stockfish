@@ -1,6 +1,6 @@
 /*
   Stockfish, a UCI chess playing engine derived from Glaurung 2.1
-  Copyright (C) 2004-2025 The Stockfish developers (see AUTHORS file)
+  Copyright (C) 2004-2026 The Stockfish developers (see AUTHORS file)
 
   Stockfish is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -360,6 +360,8 @@ struct AccumulatorUpdateContext {
         vec_t      acc[Tiling::NumRegs];
         psqt_vec_t psqt[Tiling::NumPsqtRegs];
 
+        const auto* threatWeights = &featureTransformer.threatWeights[0];
+
         for (IndexType j = 0; j < Dimensions / Tiling::TileHeight; ++j)
         {
             auto* fromTile = reinterpret_cast<const vec_t*>(&fromAcc[j * Tiling::TileHeight]);
@@ -368,12 +370,11 @@ struct AccumulatorUpdateContext {
             for (IndexType k = 0; k < Tiling::NumRegs; ++k)
                 acc[k] = fromTile[k];
 
-            for (IndexType i = 0; i < removed.size(); ++i)
+            for (int i = 0; i < removed.ssize(); ++i)
             {
-                IndexType       index  = removed[i];
-                const IndexType offset = Dimensions * index + j * Tiling::TileHeight;
-                auto*           column =
-                  reinterpret_cast<const vec_i8_t*>(&featureTransformer.threatWeights[offset]);
+                size_t       index  = removed[i];
+                const size_t offset = Dimensions * index;
+                auto*        column = reinterpret_cast<const vec_i8_t*>(&threatWeights[offset]);
 
     #ifdef USE_NEON
                 for (IndexType k = 0; k < Tiling::NumRegs; k += 2)
@@ -387,12 +388,11 @@ struct AccumulatorUpdateContext {
     #endif
             }
 
-            for (IndexType i = 0; i < added.size(); ++i)
+            for (int i = 0; i < added.ssize(); ++i)
             {
-                IndexType       index  = added[i];
-                const IndexType offset = Dimensions * index + j * Tiling::TileHeight;
-                auto*           column =
-                  reinterpret_cast<const vec_i8_t*>(&featureTransformer.threatWeights[offset]);
+                size_t       index  = added[i];
+                const size_t offset = Dimensions * index;
+                auto*        column = reinterpret_cast<const vec_i8_t*>(&threatWeights[offset]);
 
     #ifdef USE_NEON
                 for (IndexType k = 0; k < Tiling::NumRegs; k += 2)
@@ -408,6 +408,8 @@ struct AccumulatorUpdateContext {
 
             for (IndexType k = 0; k < Tiling::NumRegs; k++)
                 vec_store(&toTile[k], acc[k]);
+
+            threatWeights += Tiling::TileHeight;
         }
 
         for (IndexType j = 0; j < PSQTBuckets / Tiling::PsqtTileHeight; ++j)
@@ -420,22 +422,22 @@ struct AccumulatorUpdateContext {
             for (IndexType k = 0; k < Tiling::NumPsqtRegs; ++k)
                 psqt[k] = fromTilePsqt[k];
 
-            for (IndexType i = 0; i < removed.size(); ++i)
+            for (int i = 0; i < removed.ssize(); ++i)
             {
-                IndexType       index      = removed[i];
-                const IndexType offset     = PSQTBuckets * index + j * Tiling::PsqtTileHeight;
-                auto*           columnPsqt = reinterpret_cast<const psqt_vec_t*>(
+                size_t       index      = removed[i];
+                const size_t offset     = PSQTBuckets * index + j * Tiling::PsqtTileHeight;
+                auto*        columnPsqt = reinterpret_cast<const psqt_vec_t*>(
                   &featureTransformer.threatPsqtWeights[offset]);
 
                 for (std::size_t k = 0; k < Tiling::NumPsqtRegs; ++k)
                     psqt[k] = vec_sub_psqt_32(psqt[k], columnPsqt[k]);
             }
 
-            for (IndexType i = 0; i < added.size(); ++i)
+            for (int i = 0; i < added.ssize(); ++i)
             {
-                IndexType       index      = added[i];
-                const IndexType offset     = PSQTBuckets * index + j * Tiling::PsqtTileHeight;
-                auto*           columnPsqt = reinterpret_cast<const psqt_vec_t*>(
+                size_t       index      = added[i];
+                const size_t offset     = PSQTBuckets * index + j * Tiling::PsqtTileHeight;
+                auto*        columnPsqt = reinterpret_cast<const psqt_vec_t*>(
                   &featureTransformer.threatPsqtWeights[offset]);
 
                 for (std::size_t k = 0; k < Tiling::NumPsqtRegs; ++k)
@@ -505,19 +507,23 @@ void double_inc_update(Color                                                   p
     assert(added.size() < 2);
     PSQFeatureSet::append_changed_indices(perspective, ksq, target_state.diff, removed, added);
 
-    assert(added.size() == 1);
-    assert(removed.size() == 2 || removed.size() == 3);
+    [[maybe_unused]] const int addedSize   = added.ssize();
+    [[maybe_unused]] const int removedSize = removed.ssize();
+
+    assert(addedSize == 1);
+    assert(removedSize == 2 || removedSize == 3);
 
     // Workaround compiler warning for uninitialized variables, replicated on
     // profile builds on windows with gcc 14.2.0.
-    // TODO remove once unneeded
-    sf_assume(added.size() == 1);
-    sf_assume(removed.size() == 2 || removed.size() == 3);
+    // Also helps with optimizations on some compilers.
+
+    sf_assume(addedSize == 1);
+    sf_assume(removedSize == 2 || removedSize == 3);
 
     auto updateContext =
       make_accumulator_update_context(perspective, featureTransformer, computed, target_state);
 
-    if (removed.size() == 2)
+    if (removedSize == 2)
     {
         updateContext.template apply<Add, Sub, Sub>(added[0], removed[0], removed[1]);
     }
@@ -591,35 +597,41 @@ void update_accumulator_incremental(
         updateContext.apply(added, removed);
     else
     {
-        assert(added.size() == 1 || added.size() == 2);
-        assert(removed.size() == 1 || removed.size() == 2);
-        assert((Forward && added.size() <= removed.size())
-               || (!Forward && added.size() >= removed.size()));
+        [[maybe_unused]] const int addedSize   = added.ssize();
+        [[maybe_unused]] const int removedSize = removed.ssize();
+
+        assert(addedSize == 1 || addedSize == 2);
+        assert(removedSize == 1 || removedSize == 2);
+        assert((Forward && addedSize <= removedSize) || (!Forward && addedSize >= removedSize));
 
         // Workaround compiler warning for uninitialized variables, replicated
         // on profile builds on windows with gcc 14.2.0.
-        // TODO remove once unneeded
-        sf_assume(added.size() == 1 || added.size() == 2);
-        sf_assume(removed.size() == 1 || removed.size() == 2);
+        // Also helps with optimizations on some compilers.
 
-        if ((Forward && removed.size() == 1) || (!Forward && added.size() == 1))
+        sf_assume(addedSize == 1 || addedSize == 2);
+        sf_assume(removedSize == 1 || removedSize == 2);
+
+        if (!(removedSize == 1 || removedSize == 2) || !(addedSize == 1 || addedSize == 2))
+            sf_unreachable();
+
+        if ((Forward && removedSize == 1) || (!Forward && addedSize == 1))
         {
-            assert(added.size() == 1 && removed.size() == 1);
+            assert(addedSize == 1 && removedSize == 1);
             updateContext.template apply<Add, Sub>(added[0], removed[0]);
         }
-        else if (Forward && added.size() == 1)
+        else if (Forward && addedSize == 1)
         {
-            assert(removed.size() == 2);
+            assert(removedSize == 2);
             updateContext.template apply<Add, Sub, Sub>(added[0], removed[0], removed[1]);
         }
-        else if (!Forward && removed.size() == 1)
+        else if (!Forward && removedSize == 1)
         {
-            assert(added.size() == 2);
+            assert(addedSize == 2);
             updateContext.template apply<Add, Add, Sub>(added[0], added[1], removed[0]);
         }
         else
         {
-            assert(added.size() == 2 && removed.size() == 2);
+            assert(addedSize == 2 && removedSize == 2);
             updateContext.template apply<Add, Add, Sub, Sub>(added[0], added[1], removed[0],
                                                              removed[1]);
         }
@@ -643,6 +655,18 @@ Bitboard get_changed_pieces(const std::array<Piece, SQUARE_NB>& oldPieces,
         sameBB |= static_cast<Bitboard>(equalMask) << i;
     }
     return ~sameBB;
+#elif defined(USE_NEON)
+    uint8x16x4_t old_v = vld4q_u8(reinterpret_cast<const uint8_t*>(oldPieces.data()));
+    uint8x16x4_t new_v = vld4q_u8(reinterpret_cast<const uint8_t*>(newPieces.data()));
+    auto         cmp   = [=](const int i) { return vceqq_u8(old_v.val[i], new_v.val[i]); };
+
+    uint8x16_t cmp0_1 = vsriq_n_u8(cmp(1), cmp(0), 1);
+    uint8x16_t cmp2_3 = vsriq_n_u8(cmp(3), cmp(2), 1);
+    uint8x16_t merged = vsriq_n_u8(cmp2_3, cmp0_1, 2);
+    merged            = vsriq_n_u8(merged, merged, 4);
+    uint8x8_t sameBB  = vshrn_n_u16(vreinterpretq_u16_u8(merged), 4);
+
+    return ~vget_lane_u64(vreinterpret_u64_u8(sameBB), 0);
 #else
     Bitboard changed = 0;
 
@@ -691,6 +715,8 @@ void update_accumulator_refresh_cache(Color                                 pers
     vec_t      acc[Tiling::NumRegs];
     psqt_vec_t psqt[Tiling::NumPsqtRegs];
 
+    const auto* weights = &featureTransformer.weights[0];
+
     for (IndexType j = 0; j < Dimensions / Tiling::TileHeight; ++j)
     {
         auto* accTile =
@@ -700,33 +726,33 @@ void update_accumulator_refresh_cache(Color                                 pers
         for (IndexType k = 0; k < Tiling::NumRegs; ++k)
             acc[k] = entryTile[k];
 
-        IndexType i = 0;
-        for (; i < std::min(removed.size(), added.size()); ++i)
+        int i = 0;
+        for (; i < std::min(removed.ssize(), added.ssize()); ++i)
         {
-            IndexType       indexR  = removed[i];
-            const IndexType offsetR = Dimensions * indexR + j * Tiling::TileHeight;
-            auto* columnR = reinterpret_cast<const vec_t*>(&featureTransformer.weights[offsetR]);
-            IndexType       indexA  = added[i];
-            const IndexType offsetA = Dimensions * indexA + j * Tiling::TileHeight;
-            auto* columnA = reinterpret_cast<const vec_t*>(&featureTransformer.weights[offsetA]);
+            size_t       indexR  = removed[i];
+            const size_t offsetR = Dimensions * indexR;
+            auto*        columnR = reinterpret_cast<const vec_t*>(&weights[offsetR]);
+            size_t       indexA  = added[i];
+            const size_t offsetA = Dimensions * indexA;
+            auto*        columnA = reinterpret_cast<const vec_t*>(&weights[offsetA]);
 
             for (IndexType k = 0; k < Tiling::NumRegs; ++k)
                 acc[k] = fused<Vec16Wrapper, Add, Sub>(acc[k], columnA[k], columnR[k]);
         }
-        for (; i < removed.size(); ++i)
+        for (; i < removed.ssize(); ++i)
         {
-            IndexType       index  = removed[i];
-            const IndexType offset = Dimensions * index + j * Tiling::TileHeight;
-            auto* column = reinterpret_cast<const vec_t*>(&featureTransformer.weights[offset]);
+            size_t       index  = removed[i];
+            const size_t offset = Dimensions * index;
+            auto*        column = reinterpret_cast<const vec_t*>(&weights[offset]);
 
             for (IndexType k = 0; k < Tiling::NumRegs; ++k)
                 acc[k] = vec_sub_16(acc[k], column[k]);
         }
-        for (; i < added.size(); ++i)
+        for (; i < added.ssize(); ++i)
         {
-            IndexType       index  = added[i];
-            const IndexType offset = Dimensions * index + j * Tiling::TileHeight;
-            auto* column = reinterpret_cast<const vec_t*>(&featureTransformer.weights[offset]);
+            size_t       index  = added[i];
+            const size_t offset = Dimensions * index;
+            auto*        column = reinterpret_cast<const vec_t*>(&weights[offset]);
 
             for (IndexType k = 0; k < Tiling::NumRegs; ++k)
                 acc[k] = vec_add_16(acc[k], column[k]);
@@ -736,6 +762,8 @@ void update_accumulator_refresh_cache(Color                                 pers
             vec_store(&entryTile[k], acc[k]);
         for (IndexType k = 0; k < Tiling::NumRegs; k++)
             vec_store(&accTile[k], acc[k]);
+
+        weights += Tiling::TileHeight;
     }
 
     for (IndexType j = 0; j < PSQTBuckets / Tiling::PsqtTileHeight; ++j)
@@ -748,21 +776,21 @@ void update_accumulator_refresh_cache(Color                                 pers
         for (IndexType k = 0; k < Tiling::NumPsqtRegs; ++k)
             psqt[k] = entryTilePsqt[k];
 
-        for (IndexType i = 0; i < removed.size(); ++i)
+        for (int i = 0; i < removed.ssize(); ++i)
         {
-            IndexType       index  = removed[i];
-            const IndexType offset = PSQTBuckets * index + j * Tiling::PsqtTileHeight;
-            auto*           columnPsqt =
+            size_t       index  = removed[i];
+            const size_t offset = PSQTBuckets * index + j * Tiling::PsqtTileHeight;
+            auto*        columnPsqt =
               reinterpret_cast<const psqt_vec_t*>(&featureTransformer.psqtWeights[offset]);
 
             for (std::size_t k = 0; k < Tiling::NumPsqtRegs; ++k)
                 psqt[k] = vec_sub_psqt_32(psqt[k], columnPsqt[k]);
         }
-        for (IndexType i = 0; i < added.size(); ++i)
+        for (int i = 0; i < added.ssize(); ++i)
         {
-            IndexType       index  = added[i];
-            const IndexType offset = PSQTBuckets * index + j * Tiling::PsqtTileHeight;
-            auto*           columnPsqt =
+            size_t       index  = added[i];
+            const size_t offset = PSQTBuckets * index + j * Tiling::PsqtTileHeight;
+            auto*        columnPsqt =
               reinterpret_cast<const psqt_vec_t*>(&featureTransformer.psqtWeights[offset]);
 
             for (std::size_t k = 0; k < Tiling::NumPsqtRegs; ++k)
@@ -820,6 +848,8 @@ void update_threats_accumulator_full(Color                                 persp
     vec_t      acc[Tiling::NumRegs];
     psqt_vec_t psqt[Tiling::NumPsqtRegs];
 
+    const auto* threatWeights = &featureTransformer.threatWeights[0];
+
     for (IndexType j = 0; j < Dimensions / Tiling::TileHeight; ++j)
     {
         auto* accTile =
@@ -828,14 +858,13 @@ void update_threats_accumulator_full(Color                                 persp
         for (IndexType k = 0; k < Tiling::NumRegs; ++k)
             acc[k] = vec_zero();
 
-        IndexType i = 0;
+        int i = 0;
 
-        for (; i < active.size(); ++i)
+        for (; i < active.ssize(); ++i)
         {
-            IndexType       index  = active[i];
-            const IndexType offset = Dimensions * index + j * Tiling::TileHeight;
-            auto*           column =
-              reinterpret_cast<const vec_i8_t*>(&featureTransformer.threatWeights[offset]);
+            size_t       index  = active[i];
+            const size_t offset = Dimensions * index;
+            auto*        column = reinterpret_cast<const vec_i8_t*>(&threatWeights[offset]);
 
     #ifdef USE_NEON
             for (IndexType k = 0; k < Tiling::NumRegs; k += 2)
@@ -851,6 +880,8 @@ void update_threats_accumulator_full(Color                                 persp
 
         for (IndexType k = 0; k < Tiling::NumRegs; k++)
             vec_store(&accTile[k], acc[k]);
+
+        threatWeights += Tiling::TileHeight;
     }
 
     for (IndexType j = 0; j < PSQTBuckets / Tiling::PsqtTileHeight; ++j)
@@ -861,11 +892,11 @@ void update_threats_accumulator_full(Color                                 persp
         for (IndexType k = 0; k < Tiling::NumPsqtRegs; ++k)
             psqt[k] = vec_zero_psqt();
 
-        for (IndexType i = 0; i < active.size(); ++i)
+        for (int i = 0; i < active.ssize(); ++i)
         {
-            IndexType       index  = active[i];
-            const IndexType offset = PSQTBuckets * index + j * Tiling::PsqtTileHeight;
-            auto*           columnPsqt =
+            size_t       index  = active[i];
+            const size_t offset = PSQTBuckets * index + j * Tiling::PsqtTileHeight;
+            auto*        columnPsqt =
               reinterpret_cast<const psqt_vec_t*>(&featureTransformer.threatPsqtWeights[offset]);
 
             for (std::size_t k = 0; k < Tiling::NumPsqtRegs; ++k)

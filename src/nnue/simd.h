@@ -1,6 +1,6 @@
 /*
   Stockfish, a UCI chess playing engine derived from Glaurung 2.1
-  Copyright (C) 2004-2025 The Stockfish developers (see AUTHORS file)
+  Copyright (C) 2004-2026 The Stockfish developers (see AUTHORS file)
 
   Stockfish is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -216,7 +216,7 @@ static constexpr std::uint32_t Mask[4] = {1, 2, 4, 8};
 
     #ifndef __aarch64__
 // Single instruction doesn't exist on 32-bit ARM
-inline int8x16_t vmovl_high_s8(int8x16_t val) { return vmovl_s8(vget_high_s8(val)); }
+inline int16x8_t vmovl_high_s8(int8x16_t val) { return vmovl_s8(vget_high_s8(val)); }
     #endif
 
 #else
