@@ -81,8 +81,6 @@ int correction_value(const Worker& w, const Position& pos, const Stack* const ss
     const Color us     = pos.side_to_move();
     const auto  m      = (ss - 1)->currentMove;
     const auto& shared = w.sharedHistory;
-    
-    // Get confidence-weighted corrections using Bayesian entries
     const int   pcv    = shared.pawn_correction_entry(pos).at(us).pawn.get_weighted();
     const int   micv   = shared.minor_piece_correction_entry(pos).at(us).minor.get_weighted();
     const int   wnpcv  = shared.nonpawn_correction_entry<WHITE>(pos).at(us).nonPawnWhite.get_weighted();
@@ -110,12 +108,8 @@ void update_correction_history(const Position& pos,
 
     constexpr int nonPawnWeight = 178;
     auto&         shared        = workerThread.sharedHistory;
+    int           depth_factor  = std::min((ss->ply) / 4 + 1, 10);
 
-    // Calculate depth factor for confidence: deeper searches are more reliable
-    // ply / 4 gives us gradual confidence building, capped at 10 per update
-    int depth_factor = std::min((ss->ply) / 4 + 1, 10);
-
-    // Bayesian updates with confidence tracking
     shared.pawn_correction_entry(pos).at(us).pawn.bayesian_update(bonus, depth_factor);
     shared.minor_piece_correction_entry(pos).at(us).minor.bayesian_update(
         bonus * 156 / 128, depth_factor);
@@ -124,7 +118,6 @@ void update_correction_history(const Position& pos,
     shared.nonpawn_correction_entry<BLACK>(pos).at(us).nonPawnBlack.bayesian_update(
         bonus * nonPawnWeight / 128, depth_factor);
 
-    // Branchless: use mask to zero bonus when move is not ok
     const int    mask   = int(m.is_ok());
     const Square to     = m.to_sq_unchecked();
     const Piece  pc     = pos.piece_on(to);
@@ -2219,4 +2212,5 @@ bool RootMove::extract_ponder_from_tt(const TranspositionTable& tt, Position& po
 
 
 }  // namespace Stockfish
+
 
