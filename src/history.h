@@ -165,42 +165,28 @@ enum CorrHistType {
     Continuation,  // Combined history of move pairs
 };
 
-// Bayesian correction entry with confidence tracking
 template<typename T, int D>
 struct BayesianCorrectionEntry {
-    StatsEntry<T, D, true> mean;              // Posterior mean correction (atomic)
-    StatsEntry<int, 1000, true> confidence;   // Confidence level 0-1000 (atomic for thread safety)
+    StatsEntry<T, D, true> mean;
+    StatsEntry<std::int16_t, 1000, true> confidence;
 
-    // Get confidence-weighted correction value
     T get_weighted() const {
         int conf = std::min(int(confidence), 1000);
         if (conf == 0)
             return 0;
-        
-        // Linear confidence damping: simple and effective
-        // Full strength at conf=1000, 50% at conf=500, 10% at conf=100
-        // Use int for intermediate to avoid int16_t overflow
         return static_cast<T>((int(mean) * conf) / 1000);
     }
 
-    // Bayesian update with adaptive learning rate
     void bayesian_update(int observation, int depth_factor) {
-        // Increase confidence based on search depth (clamped at 1000)
-        int new_conf = std::min(int(confidence) + depth_factor, 1000);
-        confidence   = new_conf;
-
-        // The StatsEntry << operator already handles dampening properly.
-        // We just adjust the bonus magnitude based on confidence:
-        // - Low confidence: use full observation to learn quickly
-        // - High confidence: reduce update magnitude to resist noise
-        int dampened_obs = (new_conf < 500) ? observation : (observation * 3 / 4);
-        
-        mean << dampened_obs;
+        int new_conf   = std::min(int(confidence) + depth_factor, 1000);
+        confidence     = new_conf;
+        int dampened   = (new_conf < 500) ? observation : (observation * 3 / 4);
+        mean << dampened;
     }
 
     void operator=(T val) {
         mean       = val;
-        confidence = 0;  // Start with zero confidence
+        confidence = 0;
     }
 };
 
@@ -218,7 +204,6 @@ struct CorrectionBundle {
         nonPawnBlack = val;
     }
 
-    // Required for MultiArray::fill() compatibility (called by clear_range with int)
     void fill(int val) {
         pawn         = static_cast<T>(val);
         minor        = static_cast<T>(val);
@@ -318,3 +303,4 @@ struct SharedHistories {
 }  // namespace Stockfish
 
 #endif  // #ifndef HISTORY_H_INCLUDED
+
