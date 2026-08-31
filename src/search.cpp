@@ -808,6 +808,7 @@ Value Search::Worker::search(
     (ss - 1)->reduction = 0;
     ss->statScore       = 0;
     (ss + 2)->cutoffCnt = 0;
+    ss->nmpFailLow      = 0;
 
     const auto correctionValue = correction_value(*this, pos, ss);
 
@@ -1041,6 +1042,8 @@ Value Search::Worker::search(
             if (v >= beta)
                 return nullValue;
         }
+        else
+            ss->nmpFailLow = std::clamp(beta - nullValue, 0, 512);
     }
 
     improving |= ss->staticEval >= beta;
@@ -1352,7 +1355,10 @@ moves_loop:  // When in check, search starts here
         r -= ss->statScore * 439 / 4096;
 
         if (!capture && !is_decisive(alpha))
+        {
             r += 3 * std::clamp(alpha - eval, -64, 96);
+            r -= ss->nmpFailLow * 256 / 512;
+        }
 
         // Scale up reductions for expected ALL nodes
         if (allNode)
