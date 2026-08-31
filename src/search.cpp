@@ -1352,7 +1352,12 @@ moves_loop:  // When in check, search starts here
         r -= ss->statScore * 439 / 4096;
 
         if (!capture && !is_decisive(alpha))
+        {
             r += 3 * std::clamp(alpha - eval, -64, 96);
+            if (Attacks::attacks_bb(movedPiece, move.to_sq(), pos.pieces())
+                & pos.pieces(~us, KNIGHT, BISHOP, ROOK, QUEEN))
+                r -= 768;
+        }
 
         // Scale up reductions for expected ALL nodes
         if (allNode)
