@@ -807,7 +807,8 @@ Value Search::Worker::search(
     priorReduction = (ss - 1)->reduction;
     (ss - 1)->reduction = 0;
     ss->statScore       = 0;
-    (ss + 2)->cutoffCnt = 0;
+    (ss + 2)->cutoffCnt       = 0;
+    (ss + 1)->priorNmpSurplus = 0;
 
     const auto correctionValue = correction_value(*this, pos, ss);
 
@@ -1008,7 +1009,7 @@ Value Search::Worker::search(
     }
 
     // Step 10. Null move search with verification search
-    if (cutNode && ss->staticEval >= beta - 13 * depth - 47 * improving + 365 && !excludedMove
+    if (cutNode && ss->staticEval + ss->priorNmpSurplus >= beta - 13 * depth - 47 * improving + 365 && !excludedMove
         && pos.non_pawn_material(us) && ss->ply >= nmpMinPly && beta >= -2000)
     {
         assert((ss - 1)->currentMove != Move::null());
@@ -1025,7 +1026,10 @@ Value Search::Worker::search(
         if (nullValue >= beta && !is_win(nullValue))
         {
             if (nmpMinPly || depth < 16)
+            {
+                ss->priorNmpSurplus = std::clamp((nullValue - beta) / 8, 0, 64);
                 return nullValue;
+            }
 
             // Recursive verification is not allowed
             assert(!nmpMinPly);
@@ -1039,7 +1043,10 @@ Value Search::Worker::search(
             nmpMinPly = 0;
 
             if (v >= beta)
+            {
+                ss->priorNmpSurplus = std::clamp((nullValue - beta) / 8, 0, 64);
                 return nullValue;
+            }
         }
     }
 
