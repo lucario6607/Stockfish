@@ -52,6 +52,14 @@
 
 namespace Stockfish {
 
+int exactSingleMargin = 18;
+int exactDoubleMargin = 0;
+int exactTripleMargin = 0;
+
+TUNE(SetRange(0, 36), exactSingleMargin,
+     SetRange(-18, 18), exactDoubleMargin,
+     SetRange(-18, 18), exactTripleMargin);
+
 static constexpr std::array<int, 16> lmrDivisor = {3637, 2787, 2761, 2939, 3171, 3347, 3147, 2762,
                                                    2772, 3106, 3107, 3060, 3112, 2991, 3090, 3542};
 
@@ -1248,19 +1256,22 @@ moves_loop:  // When in check, search starts here
             && ttData.depth >= depth - 3 && !is_shuffling(move, ss, pos) && !seekMate)
         {
             Value singularBeta  = ttData.value - (59 + 66 * (ss->ttPv && !PvNode)) * depth / 63;
+            Value exactBeta     = singularBeta + exactSingleMargin * (ttData.bound == BOUND_EXACT) * depth / 63;
             Depth singularDepth = newDepth / 2;
 
             ss->excludedMove = move;
-            value = search<NonPV>(pos, ss, singularBeta - 1, singularBeta, singularDepth, cutNode);
+            value = search<NonPV>(pos, ss, exactBeta - 1, exactBeta, singularDepth, cutNode);
             ss->excludedMove = Move::none();
 
-            if (value < singularBeta)
+            if (value < exactBeta)
             {
                 int corrValAdj   = std::abs(correctionValue) / 198368;
                 int doubleMargin = -2 + 204 * PvNode - 152 * !ttCapture - corrValAdj
-                                 - 1175 * ttMoveHistory / 114178 - (ss->ply > rootDepth) * 38;
+                                 - 1175 * ttMoveHistory / 114178 - (ss->ply > rootDepth) * 38
+                                 + exactDoubleMargin * (ttData.bound == BOUND_EXACT) * depth / 63;
                 int tripleMargin = 70 + 279 * PvNode - 188 * !ttCapture + 81 * ss->ttPv - corrValAdj
-                                 - (ss->ply > rootDepth) * 43;
+                                 - (ss->ply > rootDepth) * 43
+                                 + exactTripleMargin * (ttData.bound == BOUND_EXACT) * depth / 63;
 
                 extension =
                   1 + (value < singularBeta - doubleMargin) + (value < singularBeta - tripleMargin);
