@@ -161,7 +161,7 @@ ifeq ($(ARCH), $(filter $(ARCH), \
                  x86-64 x86-32-sse41-popcnt x86-32-sse2 x86-32 ppc-64 ppc-64-altivec ppc-64-vsx ppc-32 e2k \
                  armv7 armv7-neon armv8 armv8-dotprod arm64-universal apple-silicon general-64 general-32 riscv64 \
                  riscv64-rva23 riscv64-universal loongarch64 loongarch64-lsx loongarch64-lasx wasm32 wasm32-relaxed-simd \
-                 sparc sparc64))
+                 sparc))
    SUPPORTED_ARCH=true
 else
    SUPPORTED_ARCH=false
@@ -489,11 +489,6 @@ endif
 ifeq ($(ARCH),sparc)
 	arch = sparc
 	bits = 32
-endif
-
-ifeq ($(ARCH),sparc64)
-	arch = sparc64
-	bits = 64
 endif
 
 endif
@@ -1071,7 +1066,6 @@ help:
 	echo "loongarch64-lsx         > LoongArch 64-bit with SIMD eXtension" && \
 	echo "loongarch64-lasx        > LoongArch 64-bit with Advanced SIMD eXtension" && \
 	echo "sparc                   > SPARC 32-bit (e.g. SPARC V8 / LEON3)" && \
-	echo "sparc64                 > SPARC 64-bit (SPARC V9)" && \
 	echo "" && \
 	echo "Supported compilers:" && \
 	echo "" && \
