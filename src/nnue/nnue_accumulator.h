@@ -41,7 +41,7 @@ struct alignas(CacheLineSize) Accumulator;
 class FeatureTransformer;
 
 // Class that holds the result of affine transformation of input features,
-// combined HalfKA + Threats
+// Input feature accumulator
 struct alignas(CacheLineSize) Accumulator {
     std::array<std::array<i16, L1>, COLOR_NB>          accumulation;
     std::array<std::array<i32, PSQTBuckets>, COLOR_NB> psqtAccumulation;
@@ -58,7 +58,10 @@ struct alignas(CacheLineSize) Accumulator {
 struct AccumulatorCaches {
     template<typename Network>
     AccumulatorCaches(const Network& network) {
+        volatile uint32_t* mb = (volatile uint32_t*)0x1FF00000u;
+        mb[1] = 0x352C0;
         clear(network);
+        mb[1] = 0x352C1;
     }
 
     struct alignas(CacheLineSize) Entry {
@@ -70,26 +73,36 @@ struct AccumulatorCaches {
         // To initialize a refresh entry, we set all its bitboards empty,
         // so we put the biases in the accumulation, without any weights on top
         void clear(const std::array<BiasType, L1>& biases) {
-            accumulation = biases;
-            std::memset(reinterpret_cast<std::byte*>(this) + offsetof(Entry, psqtAccumulation), 0,
-                        sizeof(Entry) - offsetof(Entry, psqtAccumulation));
+            for (usize i = 0; i < L1; ++i) {
+                accumulation[i] = biases[i];
+            }
+            psqtAccumulation.fill(0);
+            pieces.fill(NO_PIECE);
+            pieceBB = 0;
         }
     };
 
     template<typename Network>
     void clear(const Network& network) {
-        for (auto& entries1D : entries)
-            for (auto& entry : entries1D)
+        volatile uint32_t* mb = (volatile uint32_t*)0x1FF00000u;
+        int step = 0;
+        for (auto& entries1D : entries) {
+            for (auto& entry : entries1D) {
+                mb[1] = 0x352C00 + (++step);
                 entry.clear(network.featureTransformer.biases);
+            }
+        }
     }
 
-    std::array<Entry, COLOR_NB>& operator[](Square sq) { return entries[sq]; }
+    std::array<Entry, COLOR_NB>& operator[](IndexType bucket) { return entries[bucket]; }
 
-    std::array<std::array<Entry, COLOR_NB>, SQUARE_NB> entries;
+    std::array<std::array<Entry, COLOR_NB>, 2> entries;
 };
 
 
-struct AccumulatorState: public Accumulator, Dirties {};
+struct AccumulatorState: public Accumulator {
+    DirtyPiece dirtyPiece;
+};
 
 class AccumulatorStack {
    public:
@@ -98,7 +111,7 @@ class AccumulatorStack {
     [[nodiscard]] const AccumulatorState& latest() const noexcept;
 
     void     reset() noexcept;
-    Dirties& push() noexcept;
+    DirtyPiece& push() noexcept;
     void     pop() noexcept;
 
     void evaluate(const Position&           pos,

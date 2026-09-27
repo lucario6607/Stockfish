@@ -67,6 +67,9 @@ class AffineTransformSparseInput {
 
     using OutputBuffer = OutputType[PaddedOutputDimensions];
 
+    const OutputType* get_biases() const { return biases; }
+    const i8* get_weights() const { return weights; }
+
     // Hash value embedded in the evaluation file
     static constexpr u32 get_hash_value(u32 prevHash) {
         u32 hashValue = 0xCC03DAE4u;

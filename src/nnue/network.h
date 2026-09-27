@@ -69,6 +69,12 @@ class Network {
                            AccumulatorStack&  accumulatorStack,
                            AccumulatorCaches& cache) const;
 
+    std::pair<Value, bool> evaluate_start(const Position&    pos,
+                                          AccumulatorStack&  accumulatorStack,
+                                          AccumulatorCaches& cache) const;
+
+    Value evaluate_finish() const;
+
 
     void verify(const std::function<void(std::string_view)>& f,
                 const EvalFile&                              evalFile,
@@ -108,6 +114,7 @@ class Network {
     friend struct AccumulatorCaches;
 };
 
+uint32_t get_accel_status();
 
 }  // namespace Stockfish::Eval::NNUE
 

@@ -210,6 +210,15 @@ ExtMove* MovePicker::score(const MoveList<Type>& ml) {
     }
 
     ExtMove* it = cur;
+    [[maybe_unused]] const auto* pawnEntry = (Type == QUIETS) ? &sharedHistory->pawn_entry(pos) : nullptr;
+    [[maybe_unused]] const int div_ply = 1 + ply;
+    [[maybe_unused]] const auto* ch0 = (Type == QUIETS) ? continuationHistory[0] : nullptr;
+    [[maybe_unused]] const auto* ch1 = (Type == QUIETS) ? continuationHistory[1] : nullptr;
+    [[maybe_unused]] const auto* ch2 = (Type == QUIETS) ? continuationHistory[2] : nullptr;
+    [[maybe_unused]] const auto* ch3 = (Type == QUIETS) ? continuationHistory[3] : nullptr;
+    [[maybe_unused]] const auto* ch5 = (Type == QUIETS) ? continuationHistory[5] : nullptr;
+    [[maybe_unused]] const auto* lowPly = (Type == QUIETS && ply < LOW_PLY_HISTORY_SIZE) ? &(*lowPlyHistory)[ply] : nullptr;
+
     for (auto move : ml)
     {
         ExtMove& m = *it++;
@@ -227,30 +236,35 @@ ExtMove* MovePicker::score(const MoveList<Type>& ml) {
 
         else if constexpr (Type == QUIETS)
         {
-            // Use a local accumulator to eliminate redundant stores to m.value
-
             // histories
-            int value = 2 * (*mainHistory)[us][m.raw()];
-            value += 2 * sharedHistory->pawn_entry(pos)[pc][to];
-            value += (*continuationHistory[0])[pc][to];
-            value += (*continuationHistory[1])[pc][to];
-            value += (*continuationHistory[2])[pc][to];
-            value += (*continuationHistory[3])[pc][to];
-            value += (*continuationHistory[5])[pc][to];
+            m.value = 2 * (*mainHistory)[us][m.raw()];
+            m.value += 2 * (*pawnEntry)[pc][to];
+            m.value += (*ch0)[pc][to]
+                     + (*ch1)[pc][to]
+                     + (*ch2)[pc][to]
+                     + (*ch3)[pc][to]
+                     + (*ch5)[pc][to];
 
             // bonus for checks
-            value += ((pos.check_squares(pt) & to) && pos.see_ge(m, -75)) * 16384;
+            m.value += ((pos.check_squares(pt) & to) && pos.see_ge(m, -75)) * 16384;
 
             // penalty for moving to a square threatened by a lesser piece
             // or bonus for escaping an attack by a lesser piece.
             int v = 20 * (bool(threatByLesser[pt] & from) - bool(threatByLesser[pt] & to));
-            value += PieceValue[pt] * v;
+            m.value += PieceValue[pt] * v;
 
-
-            if (ply < LOW_PLY_HISTORY_SIZE)
-                value += 8 * (*lowPlyHistory)[ply][m.raw()] / (1 + ply);
-
-            m.value = value;
+            if (lowPly)
+            {
+                int raw = (*lowPly)[m.raw()];
+                switch (ply) {
+                    case 0:  m.value += raw << 3; break;
+                    case 1:  m.value += raw << 2; break;
+                    case 2:  m.value += (raw * 8) / 3; break;
+                    case 3:  m.value += raw << 1; break;
+                    case 4:  m.value += (raw * 8) / 5; break;
+                    default: m.value += (raw * 8) / div_ply; break;
+                }
+            }
         }
 
         else  // Type == EVASIONS

@@ -36,10 +36,8 @@
 #include <utility>
 #include <variant>
 
-#if (defined(__linux__) && !defined(__ANDROID__)) || defined(__APPLE__) || defined(__FreeBSD__) \
-  || defined(__OpenBSD__) || defined(__NetBSD__) || defined(__DragonFly__)
-    #define USE_UNIX_SHM
-    #include "shm_unix.h"
+#if defined(__linux__) && !defined(__ANDROID__)
+    #include "shm_linux.h"
 #endif
 
 #include "types.h"
@@ -404,7 +402,7 @@ class SharedMemoryBackend {
     std::string last_error_message;
 };
 
-#elif defined(USE_UNIX_SHM)
+#elif defined(__linux__) && !defined(__ANDROID__)
 
 template<typename T>
 class SharedMemoryBackend {
@@ -536,7 +534,7 @@ struct SystemWideSharedConstant {
                       discriminator);
         std::string shm_name = buf;
 
-#if defined(USE_UNIX_SHM)
+#if defined(__linux__) && !defined(__ANDROID__)
         // POSIX shared memory names must start with a slash
         shm_name = "/sf_" + createHashString(shm_name);
 

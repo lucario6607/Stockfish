@@ -86,17 +86,16 @@ inline Move* splat_moves(Move* moveList, Square from, Bitboard to_bb) {
 template<GenType Type, Direction D, bool Enemy>
 Move* make_promotions(Move* moveList, [[maybe_unused]] Square to) {
 
-    constexpr bool          all  = Type == EVASIONS || Type == NON_EVASIONS;
-    [[maybe_unused]] Square from = to - D;
+    constexpr bool all = Type == EVASIONS || Type == NON_EVASIONS;
 
     if constexpr (Type == CAPTURES || all)
-        *moveList++ = Move::make<PROMOTION>(from, to, QUEEN);
+        *moveList++ = Move::make<PROMOTION>(to - D, to, QUEEN);
 
     if constexpr ((Type == CAPTURES && Enemy) || (Type == QUIETS && !Enemy) || all)
     {
-        *moveList++ = Move::make<PROMOTION>(from, to, ROOK);
-        *moveList++ = Move::make<PROMOTION>(from, to, BISHOP);
-        *moveList++ = Move::make<PROMOTION>(from, to, KNIGHT);
+        *moveList++ = Move::make<PROMOTION>(to - D, to, ROOK);
+        *moveList++ = Move::make<PROMOTION>(to - D, to, BISHOP);
+        *moveList++ = Move::make<PROMOTION>(to - D, to, KNIGHT);
     }
 
     return moveList;
@@ -122,8 +121,8 @@ Move* generate_pawn_moves(const Position& pos, Move* moveList, Bitboard target) 
     // Single and double pawn pushes, no promotions
     if constexpr (Type != CAPTURES)
     {
-        Bitboard b1 = shift(pawnsNotOn7, Up) & emptySquares;
-        Bitboard b2 = shift(b1 & TRank3BB, Up) & emptySquares;
+        Bitboard b1 = shift<Up>(pawnsNotOn7) & emptySquares;
+        Bitboard b2 = shift<Up>(b1 & TRank3BB) & emptySquares;
 
         if constexpr (Type == EVASIONS)  // Consider only blocking squares
         {
@@ -138,9 +137,9 @@ Move* generate_pawn_moves(const Position& pos, Move* moveList, Bitboard target) 
     // Promotions and underpromotions
     if (pawnsOn7)
     {
-        Bitboard b1 = shift(pawnsOn7, UpRight) & enemies;
-        Bitboard b2 = shift(pawnsOn7, UpLeft) & enemies;
-        Bitboard b3 = shift(pawnsOn7, Up) & emptySquares;
+        Bitboard b1 = shift<UpRight>(pawnsOn7) & enemies;
+        Bitboard b2 = shift<UpLeft>(pawnsOn7) & enemies;
+        Bitboard b3 = shift<Up>(pawnsOn7) & emptySquares;
 
         if constexpr (Type == EVASIONS)
             b3 &= target;
@@ -158,8 +157,8 @@ Move* generate_pawn_moves(const Position& pos, Move* moveList, Bitboard target) 
     // Standard and en passant captures
     if constexpr (Type == CAPTURES || Type == EVASIONS || Type == NON_EVASIONS)
     {
-        Bitboard b1 = shift(pawnsNotOn7, UpRight) & enemies;
-        Bitboard b2 = shift(pawnsNotOn7, UpLeft) & enemies;
+        Bitboard b1 = shift<UpRight>(pawnsNotOn7) & enemies;
+        Bitboard b2 = shift<UpLeft>(pawnsNotOn7) & enemies;
 
         moveList = splat_pawn_moves<UpRight>(moveList, b1);
         moveList = splat_pawn_moves<UpLeft>(moveList, b2);

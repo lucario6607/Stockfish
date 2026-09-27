@@ -47,20 +47,29 @@ Value Eval::evaluate(const Eval::NNUE::Network&     network,
 
     assert(!pos.checkers());
 
-    auto [psqt, positional] = network.evaluate(pos, accumulators, caches);
+    auto [psqt, hw] = network.evaluate_start(pos, accumulators, caches);
+
+    // Concurrently compute board material and rule50 while the HW accelerator computes in 28 µs
+    int material = 534 * pos.count<PAWN>() + pos.non_pawn_material();
+    int rule50   = pos.rule50_count();
+
+    Value positional = hw ? network.evaluate_finish()
+                          : std::get<1>(network.evaluate(pos, accumulators, caches));
 
     Value nnue = psqt + positional;
 
     // Blend optimism and eval with nnue complexity
     int nnueComplexity = std::abs(psqt - positional);
-    optimism += optimism * i64(nnueComplexity) / 476;
-    nnue -= nnue * i64(nnueComplexity) / 18236;
+    optimism += (optimism * nnueComplexity) / 476;
+    nnue -= (nnue * nnueComplexity) / 18236;
 
-    int material = 534 * pos.count<PAWN>() + pos.non_pawn_material();
-    int v        = nnue + (nnue * i64(material) + optimism * i64(7675)) / 91000;
+    int64_t num  = int64_t(nnue) * (77871 + material) + int64_t(optimism) * (7191 + material);
+    // Fast 32-bit division: clamping guarantees GCC lowers constant division by 77871 into mulh + srai
+    int32_t num32 = static_cast<int32_t>(std::clamp<int64_t>(num, -2147483647LL, 2147483647LL));
+    int v = num32 / 77871;
 
     // Damp down the evaluation linearly when shuffling
-    v -= v * pos.rule50_count() / 199;
+    v -= (v * rule50) / 199;
 
     // Guarantee evaluation does not hit the tablebase range
     v = std::clamp(v, VALUE_TB_LOSS_IN_MAX_PLY + 1, VALUE_TB_WIN_IN_MAX_PLY - 1);

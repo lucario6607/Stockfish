@@ -141,10 +141,10 @@ std::filesystem::path path_from_utf8(const std::string& path);
 // Returns std::nullopt if the file does not exist.
 std::optional<std::string> read_file_to_string(const std::string& path);
 
-bool dbg_hit_on(bool cond, int slot = 0);
-i64  dbg_mean_of(i64 value, int slot = 0);
-i64  dbg_stdev_of(i64 value, int slot = 0);
-i64  dbg_extremes_of(i64 value, int slot = 0);
+void dbg_hit_on(bool cond, int slot = 0);
+void dbg_mean_of(i64 value, int slot = 0);
+void dbg_stdev_of(i64 value, int slot = 0);
+void dbg_extremes_of(i64 value, int slot = 0);
 void dbg_correl_of(i64 value1, i64 value2, int slot = 0);
 void dbg_print();
 void dbg_clear();
@@ -152,9 +152,39 @@ void dbg_clear();
 using TimePoint = std::chrono::milliseconds::rep;  // A value in milliseconds
 static_assert(sizeof(TimePoint) == sizeof(i64), "TimePoint should be 64 bits");
 inline TimePoint now() {
+#ifdef BAREMETAL_SPARC
+    volatile unsigned int* gpt = (volatile unsigned int*)0x80000300;
+    static unsigned int last_cnt = 0;
+    static uint64_t total_us = 0;
+    static bool inited = false;
+    if (gpt != nullptr) {
+        unsigned int cnt = gpt[4]; // 0x80000310: Timer 0 counter
+        if (!inited) {
+            last_cnt = cnt;
+            inited = true;
+        } else {
+            if (cnt <= last_cnt) {
+                total_us += (last_cnt - cnt);
+            } else {
+                total_us += (0xFFFFFFFF - cnt) + last_cnt;
+            }
+            last_cnt = cnt;
+        }
+        return (TimePoint)(total_us / 1000);
+#elif defined(BAREMETAL_RISCV)
+    uint32_t lo, hi, hi2;
+    do {
+        asm volatile("csrr %0, mcycleh" : "=r"(hi));
+        asm volatile("csrr %0, mcycle"  : "=r"(lo));
+        asm volatile("csrr %0, mcycleh" : "=r"(hi2));
+    } while (hi != hi2);
+    uint64_t cycles = ((uint64_t)hi << 32) | lo;
+    return (TimePoint)(cycles / 100000ULL);
+#else
     return std::chrono::duration_cast<std::chrono::milliseconds>(
              std::chrono::steady_clock::now().time_since_epoch())
       .count();
+#endif
 }
 
 inline std::vector<std::string_view> split(std::string_view s, std::string_view delimiter) {
@@ -336,8 +366,8 @@ class MultiArray {
 template<typename T>
 class RelaxedAtomic {
     static constexpr bool UseAtomic =
-#ifdef USE_SLOPPY_ATOMICS
-      !std::atomic<T>::is_always_lock_free || sizeof(T) > sizeof(usize);
+#if defined(USE_SLOPPY_ATOMICS) || defined(BAREMETAL_RISCV)
+      false;
 #else
       true;
 #endif
@@ -472,6 +502,13 @@ class PRNG {
 inline usize mul_hi64(u64 a, usize b) {
 #if defined(__GNUC__) && defined(IS_64BIT) && !defined(__wasm__)
     return (u128(a) * u128(b)) >> 64;
+#elif !defined(IS_64BIT)
+    uint32_t aL = static_cast<uint32_t>(a);
+    uint32_t aH = static_cast<uint32_t>(a >> 32);
+    uint32_t b32 = static_cast<uint32_t>(b);
+    uint64_t c1 = (uint64_t(aL) * b32) >> 32;
+    uint64_t c2 = uint64_t(aH) * b32 + c1;
+    return static_cast<usize>(c2 >> 32);
 #else
     u64 aL = u32(a), aH = a >> 32;
     u64 bL = u32(b), bH = u64(b) >> 32;
@@ -552,12 +589,12 @@ void move_to_front(std::vector<T>& vec, Predicate pred) {
 #endif
 
 #if defined(__GNUC__)
-    #define sf_always_inline inline __attribute__((always_inline))
+    #define sf_always_inline __attribute__((always_inline))
 #elif defined(_MSC_VER)
     #define sf_always_inline __forceinline
 #else
-    // plain inline for other compilers
-    #define sf_always_inline inline
+    // do nothing for other compilers
+    #define sf_always_inline
 #endif
 
 #if defined(__clang__)

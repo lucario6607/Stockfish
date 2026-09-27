@@ -46,7 +46,7 @@ static const unsigned char* map_embedded_nnue() {
     char        resolved[PATH_MAX];
     const char* file = realpath(path, resolved) ? resolved : path;
 
-    int fd = open(file, O_RDONLY | O_CLOEXEC);
+    int fd = open(file, O_RDONLY);
     if (fd < 0)
         return nullptr;
 

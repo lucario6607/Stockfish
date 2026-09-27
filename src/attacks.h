@@ -195,17 +195,23 @@ constexpr Bitboard safe_destination(Square s, int step) {
 }
 
 constexpr Bitboard sliding_attack(PieceType pt, Square sq, Bitboard occupied) {
-    Bitboard            attacks             = 0;
+    Bitboard            attacks = 0, dest = 0;
     constexpr Direction RookDirections[4]   = {NORTH, SOUTH, EAST, WEST};
     constexpr Direction BishopDirections[4] = {NORTH_EAST, SOUTH_EAST, SOUTH_WEST, NORTH_WEST};
 
     for (Direction d : (pt == ROOK ? RookDirections : BishopDirections))
-        for (Square s = sq; Bitboard dest = safe_destination(s, d); s += d)
+    {
+        Square s = sq;
+        while ((dest = safe_destination(s, d)))
         {
             attacks |= dest;
+            s += d;
             if (occupied & dest)
+            {
                 break;
+            }
         }
+    }
 
     return attacks;
 }

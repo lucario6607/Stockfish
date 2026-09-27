@@ -48,7 +48,8 @@ namespace Stockfish {
 
 namespace NN = Eval::NNUE;
 
-int MaxThreads = std::max(1024, 4 * int(get_hardware_concurrency()));
+constexpr int MaxHashMB  = Is64Bit ? 33554432 : 2048;
+int           MaxThreads = std::max(1024, 4 * int(get_hardware_concurrency()));
 
 // The default configuration will attempt to group L3 domains up to 32 threads.
 // This size was found to be a good balance between the Elo gain of increased
@@ -64,7 +65,11 @@ Engine::Engine(std::optional<std::filesystem::path> path) :
     networkFile{std::nullopt, ""},
     network(numaContext, get_default_network()) {
 
+    volatile unsigned int* mb = (volatile unsigned int*)MAILBOX_ADDR;
+    mb[1] = 0x31;
+
     pos.set(StartFEN, false, &states->back());
+    mb[1] = 0x32;
 
     options.add(  //
       "Debug Log File", Option("", [](const Option& o) {
@@ -87,7 +92,7 @@ Engine::Engine(std::optional<std::filesystem::path> path) :
       }));
 
     options.add(  //
-      "Hash", Option(16, 1, MaxHashMB, [this](const Option& o) {
+      "Hash", Option(1, 1, MaxHashMB, [this](const Option& o) {
           set_tt_size(o);
           return std::nullopt;
       }));
@@ -138,9 +143,13 @@ Engine::Engine(std::optional<std::filesystem::path> path) :
           return std::nullopt;
       }));
 
+    mb[1] = 0x33;
     threads.clear();
+    mb[1] = 0x34;
     threads.ensure_network_replicated();
+    mb[1] = 0x35;
     resize_threads();
+    mb[1] = 0x36;
 }
 
 std::variant<u64, PositionSetError>
@@ -245,13 +254,17 @@ bool Engine::set_numa_config_from_option(const std::string& o) {
 }
 
 void Engine::resize_threads() {
+    volatile uint32_t* mb = (volatile uint32_t*)MAILBOX_ADDR;
     threads.wait_for_search_finished();
+    mb[1] = 0x3800;
     threads.set(numaContext.get_numa_config(), {options, threads, tt, sharedHists, network},
                 updateContext);
-
+    mb[1] = 0x3801;
     // Reallocate the hash with the new threadpool size
     set_tt_size(options["Hash"]);
+    mb[1] = 0x3802;
     threads.ensure_network_replicated();
+    mb[1] = 0x3803;
 }
 
 void Engine::set_tt_size(usize mb) {
@@ -299,10 +312,14 @@ void Engine::verify_network() const {
 }
 
 std::unique_ptr<Eval::NNUE::Network> Engine::get_default_network() {
+    volatile unsigned int* mb = (volatile unsigned int*)MAILBOX_ADDR;
+    mb[1] = 0x21;
 
     auto network_ = std::make_unique<NN::Network>();
+    mb[1] = 0x22;
 
     network_->load(binaryDirectory, std::filesystem::path{}, networkFile);
+    mb[1] = 0x23;
 
     return network_;
 }
@@ -345,6 +362,7 @@ std::string Engine::visualize() const {
 }
 
 int Engine::get_hashfull(int maxAge) const { return tt.hashfull(maxAge); }
+u64 Engine::nodes_searched() const { return threads.nodes_searched(); }
 
 std::vector<std::pair<usize, usize>> Engine::get_bound_thread_count_by_numa_node() const {
     auto                                 counts = threads.get_bound_thread_count_by_numa_node();

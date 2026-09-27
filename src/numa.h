@@ -71,7 +71,6 @@ using GetThreadSelectedCpuSetMasks_t = BOOL (*)(HANDLE, PGROUP_AFFINITY, USHORT,
 #endif
 
 #include "misc.h"
-#include "thread_native.h"
 
 namespace Stockfish {
 
@@ -300,7 +299,7 @@ inline WindowsAffinity get_process_affinity() {
 
         if (GetThreadSelectedCpuSetMasks_f != nullptr)
         {
-            NativeThread th = create_native_thread(NativeThreadOptions{}, [&]() {
+            std::thread th([&]() {
                 std::set<CpuIndex> cpus;
                 bool               isAffinityFull = true;
 
@@ -834,7 +833,7 @@ class NumaConfig {
     }
 
     NumaReplicatedAccessToken bind_current_thread_to_numa_node(NumaIndex n) const {
-        if (n >= nodes.size() || nodes[n].empty())
+        if (n >= nodes.size() || nodes[n].size() == 0)
             std::exit(EXIT_FAILURE);
 
 #if defined(__linux__) && !defined(__ANDROID__)
@@ -957,18 +956,7 @@ class NumaConfig {
 
     template<typename FuncT>
     void execute_on_numa_node(NumaIndex n, FuncT&& f) const {
-        NativeThread th = create_native_thread(NativeThreadOptions{}, [this, &f, n]() {
-            bind_current_thread_to_numa_node(n);
-            std::forward<FuncT>(f)();
-        });
-
-        if (!th.joinable())
-        {
-            std::cerr << "Failed to execute function on NUMA node\n";
-            std::exit(EXIT_FAILURE);
-        }
-
-        th.join();
+        std::forward<FuncT>(f)();
     }
 
     std::vector<std::set<CpuIndex>> nodes;
@@ -1512,134 +1500,51 @@ class LazyNumaReplicated: public NumaReplicatedBase {
     }
 };
 
-// Utilizes shared memory.
 template<typename T>
 class LazyNumaReplicatedSystemWide: public NumaReplicatedBase {
    public:
     using ReplicatorFuncType = std::function<T(const T&)>;
 
     LazyNumaReplicatedSystemWide(NumaReplicationContext& ctx, std::unique_ptr<T>&& source) :
-        NumaReplicatedBase(ctx) {
-        prepare_replicate_from(std::move(source));
-    }
+        NumaReplicatedBase(ctx), instance(std::move(source)) {}
 
     LazyNumaReplicatedSystemWide(const LazyNumaReplicatedSystemWide&) = delete;
     LazyNumaReplicatedSystemWide(LazyNumaReplicatedSystemWide&& other) noexcept :
         NumaReplicatedBase(std::move(other)),
-        instances(std::exchange(other.instances, {})) {}
+        instance(std::move(other.instance)) {}
 
     LazyNumaReplicatedSystemWide& operator=(const LazyNumaReplicatedSystemWide&) = delete;
     LazyNumaReplicatedSystemWide& operator=(LazyNumaReplicatedSystemWide&& other) noexcept {
         NumaReplicatedBase::operator=(*this, std::move(other));
-        instances = std::exchange(other.instances, {});
-
+        instance = std::move(other.instance);
         return *this;
     }
 
     LazyNumaReplicatedSystemWide& operator=(std::unique_ptr<T>&& source) {
-        prepare_replicate_from(std::move(source));
-
+        instance = std::move(source);
         return *this;
     }
 
     ~LazyNumaReplicatedSystemWide() override = default;
 
-    const T& operator[](NumaReplicatedAccessToken token) const {
-        assert(token.get_numa_index() < instances.size());
-        ensure_present(token.get_numa_index());
-        return *(instances[token.get_numa_index()]);
-    }
-
-    const T& operator*() const { return *(instances[0]); }
-
-    const T* operator->() const { return &*instances[0]; }
+    const T& operator[](NumaReplicatedAccessToken) const { return *instance; }
+    const T& operator*() const { return *instance; }
+    const T* operator->() const { return instance.get(); }
 
     std::vector<std::pair<SystemWideSharedConstantAllocationStatus, std::optional<std::string>>>
     get_status_and_errors() const {
-        std::vector<std::pair<SystemWideSharedConstantAllocationStatus, std::optional<std::string>>>
-          status;
-        status.reserve(instances.size());
-
-        for (const auto& instance : instances)
-        {
-            status.emplace_back(instance.get_status(), instance.get_error_message());
-        }
-
-        return status;
+        return {{SystemWideSharedConstantAllocationStatus::LocalMemory, std::nullopt}};
     }
 
     template<typename FuncT>
     void modify_and_replicate(FuncT&& f) {
-        auto source = std::make_unique<T>(*instances[0]);
-        std::forward<FuncT>(f)(*source);
-        prepare_replicate_from(std::move(source));
+        std::forward<FuncT>(f)(*instance);
     }
 
-    void on_numa_config_changed() override {
-        // Use the first one as the source. It doesn't matter which one we use,
-        // because they all must be identical, but the first one is guaranteed to exist.
-        auto source = std::make_unique<T>(*instances[0]);
-        prepare_replicate_from(std::move(source));
-    }
+    void on_numa_config_changed() override {}
 
    private:
-    mutable std::vector<SystemWideSharedConstant<T>> instances;
-    mutable std::mutex                               mutex;
-
-    usize get_discriminator(NumaIndex idx) const {
-        const NumaConfig& cfg     = get_numa_config();
-        const NumaConfig& cfg_sys = NumaConfig::from_system(SystemNumaPolicy{}, false);
-        // as a discriminator, locate the hardware/system numadomain this cpuindex belongs to
-        CpuIndex    cpu     = *cfg.nodes[idx].begin();  // get a CpuIndex from NumaIndex
-        NumaIndex   sys_idx = cfg_sys.is_cpu_assigned(cpu) ? cfg_sys.nodeByCpu.at(cpu) : 0;
-        std::string s       = cfg_sys.to_string() + "$" + std::to_string(sys_idx);
-        return static_cast<usize>(hash_string(s));
-    }
-
-    void ensure_present(NumaIndex idx) const {
-        assert(idx < instances.size());
-
-        if (instances[idx] != nullptr)
-            return;
-
-        assert(idx != 0);
-
-        std::unique_lock<std::mutex> lock(mutex);
-        // Check again for races.
-        if (instances[idx] != nullptr)
-            return;
-
-        const NumaConfig& cfg = get_numa_config();
-        cfg.execute_on_numa_node(idx, [this, idx]() {
-            instances[idx] = SystemWideSharedConstant<T>(*instances[0], get_discriminator(idx));
-        });
-    }
-
-    void prepare_replicate_from(std::unique_ptr<T>&& source) {
-        instances.clear();
-
-        const NumaConfig& cfg = get_numa_config();
-        // We just need to make sure the first instance is there.
-        // Note that we cannot move here as we need to reallocate the data
-        // on the correct NUMA node.
-        // Even in the case of a single NUMA node we have to copy since it's shared memory.
-        if (cfg.requires_memory_replication())
-        {
-            assert(cfg.num_numa_nodes() > 0);
-
-            cfg.execute_on_numa_node(0, [this, &source]() {
-                instances.emplace_back(SystemWideSharedConstant<T>(*source, get_discriminator(0)));
-            });
-
-            // Prepare others for lazy init.
-            instances.resize(cfg.num_numa_nodes());
-        }
-        else
-        {
-            assert(cfg.num_numa_nodes() == 1);
-            instances.emplace_back(SystemWideSharedConstant<T>(*source, get_discriminator(0)));
-        }
-    }
+    std::unique_ptr<T> instance;
 };
 
 class NumaReplicationContext {

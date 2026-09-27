@@ -122,7 +122,7 @@ affine_transform_non_ssse3(i32* output, const i8* weights, const i32* biases, co
 
 #endif  // !ENABLE_SEQ_OPT
 
-template<IndexType InDims, IndexType OutDims>
+template<IndexType InDims, IndexType OutDims, bool ScrambledInput = false>
 class AffineTransform {
    public:
     // Input/output type
@@ -140,6 +140,9 @@ class AffineTransform {
 
     using OutputBuffer = OutputType[PaddedOutputDimensions];
 
+    const OutputType* get_biases() const { return biases; }
+    const i8* get_weights() const { return weights; }
+
     // Hash value embedded in the evaluation file
     static constexpr u32 get_hash_value(u32 prevHash) {
         u32 hashValue = 0xCC03DAE4u;
@@ -152,18 +155,18 @@ class AffineTransform {
     static constexpr IndexType get_weight_index_scrambled(IndexType i) {
         IndexType inputIndex = i % PaddedInputDimensions;
 
-#if defined(USE_PAIR_ACTIVATIONS) || defined(USE_LASX)
-        // At load time, pre-permute the weights to match the per-128-bit-lane interleaving that
-        // the previous layer produces, either via SqrClippedReLU::propagate_pair() or via the
-        // separate SqrClippedReLU/ClippedReLU propagate() calls, so no shuffle is needed at runtime.
-        const IndexType block = inputIndex / 32;
-        const IndexType chunk = (inputIndex % 32) / 4;
-    #if defined(USE_AVX512)
-        inputIndex = block * 32 + ((chunk % 4) * 2 + chunk / 4) * 4 + inputIndex % 4;
-    #else
-        inputIndex = block * 32 + ((chunk % 2) * 4 + chunk / 2) * 4 + inputIndex % 4;
-    #endif
+#if defined(USE_SCRAMBLED_ACTIVATIONS)
+        if constexpr (ScrambledInput)
+        {
+            // AVX2 and LASX packs operate independently on 128-bit lanes. Keep their interleaved
+            // output order and rearrange the following layer's weights instead of issuing a
+            // runtime permutation.
+            const IndexType block = inputIndex / 32;
+            const IndexType chunk = (inputIndex % 32) / 4;
+            inputIndex            = block * 32 + ((chunk % 2) * 4 + chunk / 2) * 4 + inputIndex % 4;
+        }
 #endif
+
         return inputIndex / 4 * OutputDimensions * 4 + i / PaddedInputDimensions * 4
              + inputIndex % 4;
     }
@@ -314,6 +317,8 @@ class AffineTransform {
         }
         else if constexpr (OutputDimensions == 1)
         {
+    // We cannot use AVX512 for the last layer because there are only 32 inputs
+    // and the buffer is not padded to 64 elements.
     #if defined(USE_AVX2)
             using vec_t = __m256i;
         #define vec_setzero() _mm256_setzero_si256()

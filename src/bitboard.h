@@ -100,18 +100,19 @@ constexpr Bitboard file_bb(Square s) { return file_bb(file_of(s)); }
 
 
 // Moves a bitboard one or two steps as specified by the direction D
-inline constexpr Bitboard shift(Bitboard b, Direction dir) {
-    return dir == NORTH         ? b << 8
-         : dir == SOUTH         ? b >> 8
-         : dir == NORTH + NORTH ? b << 16
-         : dir == SOUTH + SOUTH ? b >> 16
-         : dir == EAST          ? (b & ~FileHBB) << 1
-         : dir == WEST          ? (b & ~FileABB) >> 1
-         : dir == NORTH_EAST    ? (b & ~FileHBB) << 9
-         : dir == NORTH_WEST    ? (b & ~FileABB) << 7
-         : dir == SOUTH_EAST    ? (b & ~FileHBB) >> 7
-         : dir == SOUTH_WEST    ? (b & ~FileABB) >> 9
-                                : 0;
+template<Direction D>
+constexpr Bitboard shift(Bitboard b) {
+    return D == NORTH         ? b << 8
+         : D == SOUTH         ? b >> 8
+         : D == NORTH + NORTH ? b << 16
+         : D == SOUTH + SOUTH ? b >> 16
+         : D == EAST          ? (b & ~FileHBB) << 1
+         : D == WEST          ? (b & ~FileABB) >> 1
+         : D == NORTH_EAST    ? (b & ~FileHBB) << 9
+         : D == NORTH_WEST    ? (b & ~FileABB) << 7
+         : D == SOUTH_EAST    ? (b & ~FileHBB) >> 7
+         : D == SOUTH_WEST    ? (b & ~FileABB) >> 9
+                              : 0;
 }
 
 
@@ -119,12 +120,12 @@ inline constexpr Bitboard shift(Bitboard b, Direction dir) {
 // from the squares in the given bitboard.
 template<Color C>
 constexpr Bitboard pawn_attacks_bb(Bitboard b) {
-    return C == WHITE ? shift(b, NORTH_WEST) | shift(b, NORTH_EAST)
-                      : shift(b, SOUTH_WEST) | shift(b, SOUTH_EAST);
+    return C == WHITE ? shift<NORTH_WEST>(b) | shift<NORTH_EAST>(b)
+                      : shift<SOUTH_WEST>(b) | shift<SOUTH_EAST>(b);
 }
 
 constexpr Bitboard pawn_single_push_bb(Color c, Bitboard b) {
-    return shift(b, c == WHITE ? NORTH : SOUTH);
+    return c == WHITE ? shift<NORTH>(b) : shift<SOUTH>(b);
 }
 
 inline constexpr auto PawnPairBB = []() {
@@ -132,7 +133,7 @@ inline constexpr auto PawnPairBB = []() {
     for (Square s = SQ_A1; s <= SQ_H8; ++s)
     {
         Bitboard file  = file_bb(s);
-        Bitboard files = file | shift(file, EAST) | shift(file, WEST);
+        Bitboard files = file | shift<EAST>(file) | shift<WEST>(file);
         result[s]      = files & ~(Rank1BB | Rank8BB) & ~square_bb(s);
     }
     return result;
@@ -173,16 +174,9 @@ constexpr int constexpr_popcount(T v) {
 
 // Counts the number of non-zero bits in a bitboard.
 inline int popcount(Bitboard b) {
-
-#ifdef _MSC_VER
-
-    return int(_mm_popcnt_u64(b));
-
-#else  // Assumed gcc or compatible compiler
-
-    return __builtin_popcountll(b);
-
-#endif
+    uint32_t lo = static_cast<uint32_t>(b);
+    uint32_t hi = static_cast<uint32_t>(b >> 32);
+    return __builtin_popcount(lo) + __builtin_popcount(hi);
 }
 
 inline constexpr int lsb_index64[64] = {
@@ -199,71 +193,19 @@ constexpr int constexpr_lsb(u64 bb) {
 // Returns the least significant bit in a non-zero bitboard.
 inline Square lsb(Bitboard b) {
     assert(b);
-
-#if defined(__GNUC__)  // GCC, Clang, ICX
-
-    return Square(__builtin_ctzll(b));
-
-#elif defined(_MSC_VER)
-    #ifdef _WIN64  // MSVC, WIN64
-
-    unsigned long idx;
-    _BitScanForward64(&idx, b);
-    return Square(idx);
-
-    #else  // MSVC, WIN32
-    unsigned long idx;
-
-    if (b & 0xffffffff)
-    {
-        _BitScanForward(&idx, i32(b));
-        return Square(idx);
-    }
-    else
-    {
-        _BitScanForward(&idx, i32(b >> 32));
-        return Square(idx + 32);
-    }
-    #endif
-#else  // Compiler is neither GCC nor MSVC compatible
-    #error "Compiler not supported."
-#endif
+    uint32_t lo = static_cast<uint32_t>(b);
+    if (lo) return Square(__builtin_ctz(lo));
+    return Square(32 + __builtin_ctz(static_cast<uint32_t>(b >> 32)));
 }
 
 // Returns the most significant bit in a non-zero bitboard.
 inline Square msb(Bitboard b) {
     assert(b);
-
-#if defined(__GNUC__)  // GCC, Clang, ICX
-
-    return Square(63 ^ __builtin_clzll(b));
-
-#elif defined(_MSC_VER)
-    #ifdef _WIN64  // MSVC, WIN64
-
-    unsigned long idx;
-    _BitScanReverse64(&idx, b);
-    return Square(idx);
-
-    #else  // MSVC, WIN32
-
-    unsigned long idx;
-
-    if (b >> 32)
-    {
-        _BitScanReverse(&idx, i32(b >> 32));
-        return Square(idx + 32);
-    }
-    else
-    {
-        _BitScanReverse(&idx, i32(b));
-        return Square(idx);
-    }
-    #endif
-#else  // Compiler is neither GCC nor MSVC compatible
-    #error "Compiler not supported."
-#endif
+    uint32_t hi = static_cast<uint32_t>(b >> 32);
+    if (hi) return Square(32 + (31 ^ __builtin_clz(hi)));
+    return Square(31 ^ __builtin_clz(static_cast<uint32_t>(b)));
 }
+
 
 // Returns the bitboard of the least significant
 // square of a non-zero bitboard. It is equivalent to square_bb(lsb(bb)).
@@ -275,8 +217,16 @@ inline Bitboard least_significant_square_bb(Bitboard b) {
 // Finds and clears the least significant bit in a non-zero bitboard.
 inline Square pop_lsb(Bitboard& b) {
     assert(b);
-    const Square s = lsb(b);
-    b &= b - 1;
+    typedef uint32_t __attribute__((__may_alias__)) alias_u32;
+    alias_u32* p = reinterpret_cast<alias_u32*>(&b);
+    if (p[0])
+    {
+        Square s = Square(__builtin_ctz(p[0]));
+        p[0] &= p[0] - 1;
+        return s;
+    }
+    Square s = Square(32 + __builtin_ctz(p[1]));
+    p[1] &= p[1] - 1;
     return s;
 }
 

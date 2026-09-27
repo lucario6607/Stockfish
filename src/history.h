@@ -35,8 +35,8 @@
 
 namespace Stockfish {
 
-constexpr int PAWN_HISTORY_BASE_SIZE   = 8192;  // has to be a power of 2
-constexpr int UINT_16_HISTORY_SIZE     = std::numeric_limits<u16>::max() + 1;
+constexpr int PAWN_HISTORY_BASE_SIZE   = 128;   // has to be a power of 2
+constexpr int UINT_16_HISTORY_SIZE     = 4096;
 constexpr int CORRHIST_BASE_SIZE       = UINT_16_HISTORY_SIZE;
 constexpr int CORRECTION_HISTORY_LIMIT = 1024;
 constexpr int LOW_PLY_HISTORY_SIZE     = 5;
@@ -195,8 +195,26 @@ using CorrectionHistory = typename Detail::CorrHistTypedef<T>::type;
 
 using TTMoveHistory = StatsEntry<i16, 8192>;
 
-struct ContinuationHistoryBlock {
-    ContinuationHistory table[2][2];
+struct ContinuationHistoryProxy {
+    ContinuationHistory storage[1];
+    struct Row {
+        ContinuationHistory* p;
+        ContinuationHistory& operator[](int) { return p[0]; }
+        const ContinuationHistory& operator[](int) const { return p[0]; }
+    };
+    Row operator[](int) { return Row{storage}; }
+    const Row operator[](int) const { return Row{const_cast<ContinuationHistory*>(storage)}; }
+};
+
+struct ContinuationCorrectionHistoryProxy {
+    Detail::CorrHistTypedef<PieceTo>::type storage;
+    struct Row {
+        Detail::CorrHistTypedef<PieceTo>::type* p;
+        Detail::CorrHistTypedef<PieceTo>::type& operator[](int) { return *p; }
+        const Detail::CorrHistTypedef<PieceTo>::type& operator[](int) const { return *p; }
+    };
+    Row operator[](int) { return Row{&storage}; }
+    const Row operator[](int) const { return Row{const_cast<Detail::CorrHistTypedef<PieceTo>::type*>(&storage)}; }
 };
 
 // Set of histories shared between groups of threads. To avoid excessive
@@ -206,14 +224,11 @@ struct ContinuationHistoryBlock {
 struct SharedHistories {
     SharedHistories(usize threadCount) :
         correctionHistory(threadCount),
-        continuationHistoryBlock(make_unique_large_page<ContinuationHistoryBlock>()),
         pawnHistory(threadCount) {
         assert((threadCount & (threadCount - 1)) == 0 && threadCount != 0);
         sizeMinus1         = correctionHistory.get_size() - 1;
         pawnHistSizeMinus1 = pawnHistory.get_size() - 1;
     }
-
-    auto& continuationHistory() { return continuationHistoryBlock->table; }
 
     usize get_size() const { return sizeMinus1 + 1; }
 
@@ -247,9 +262,9 @@ struct SharedHistories {
         return correctionHistory[pos.non_pawn_key(c) & sizeMinus1];
     }
 
-    UnifiedCorrectionHistory               correctionHistory;
-    LargePagePtr<ContinuationHistoryBlock> continuationHistoryBlock;
-    PawnHistory                            pawnHistory;
+    UnifiedCorrectionHistory correctionHistory;
+    ContinuationHistoryProxy continuationHistory;
+    PawnHistory              pawnHistory;
 
 
    private:

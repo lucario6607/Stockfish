@@ -41,6 +41,8 @@
 #include "search.h"
 #include "types.h"
 #include "ucioption.h"
+#include "misc.h"
+#include "nnue/network.h"
 
 namespace Stockfish {
 
@@ -70,7 +72,7 @@ void UCIEngine::print_info_string(std::string_view str) {
 }
 
 UCIEngine::UCIEngine(CommandLine cli_) :
-    engine(cli_.argc > 0 ? std::optional{path_from_utf8(cli_.argv[0])} : std::nullopt),
+    engine((cli_.argc > 0 && cli_.argv && cli_.argv[0]) ? std::optional{path_from_utf8(cli_.argv[0])} : std::nullopt),
     cli(std::move(cli_)) {
 
     engine.get_options().add_info_listener([](const std::optional<std::string>& str) {
@@ -315,8 +317,8 @@ void UCIEngine::bench(std::istream& args) {
 }
 
 void UCIEngine::benchmark(std::istream& args) {
-    // Probably not very important for a test this long, but include for completeness and sanity.
-    static constexpr int NUM_WARMUP_POSITIONS = 3;
+    // Warmup positions are unnecessary on bare-metal SPARC
+    static constexpr int NUM_WARMUP_POSITIONS = 0;
 
     std::string token;
     u64         cnt = 1;
@@ -341,35 +343,27 @@ void UCIEngine::benchmark(std::istream& args) {
     ss = std::istringstream("name UCI_Chess960 value false");
     setoption(ss);
 
-    // Warmup
+    // Warmup (skipped if NUM_WARMUP_POSITIONS == 0)
     for (const auto& cmd : setup.commands)
     {
+        if (cnt > NUM_WARMUP_POSITIONS)
+            break;
+
         std::istringstream is(cmd);
         is >> token;
 
         if (token == "go")
         {
-            // One new line is produced by the search, so omit it here
-            std::cerr << "\rWarmup position " << cnt++ << '/' << NUM_WARMUP_POSITIONS;
-
             Search::LimitsType limits = parse_limits(is);
-
-            // Run with silenced network verification
             engine.go(limits);
             engine.wait_for_search_finished();
+            cnt++;
         }
         else if (token == "position")
             position(is);
         else if (token == "ucinewgame")
-        {
-            engine.search_clear();  // search_clear may take a while
-        }
-
-        if (cnt > NUM_WARMUP_POSITIONS)
-            break;
+            engine.search_clear();
     }
-
-    std::cerr << "\n";
 
     cnt = 1;
 
@@ -392,22 +386,39 @@ void UCIEngine::benchmark(std::istream& args) {
 
     engine.search_clear();  // search_clear may take a while
 
-    Time::time_point elapsed;
-    Time::duration   totalTime(0);
+    TimePoint elapsed = 0;
+    TimePoint totalTime = 0;
 
     u64 nodes = 0, nodesSearched = 0;
 
-    engine.set_on_update_full([&](const Engine::InfoFull& i) { nodesSearched = i.nodes; });
+#if defined(BAREMETAL_RISCV)
+#define MAILBOX_ADDR 0x1FF00000u
+#else
+#define MAILBOX_ADDR 0x4FF00000u
+#endif
+
+    engine.set_on_update_full([&](const Engine::InfoFull& i) {
+        nodesSearched = i.nodes;
+        volatile unsigned int* mb = (volatile unsigned int*)MAILBOX_ADDR;
+        mb[0] = 0x53504544; // 'SPED'
+        mb[1] = (unsigned int)cnt;
+        mb[2] = (unsigned int)numGoCommands;
+        u64 curTotalNodes = nodes + nodesSearched;
+        mb[3] = (unsigned int)(curTotalNodes & 0xFFFFFFFF);
+        mb[4] = (unsigned int)(curTotalNodes >> 32);
+        const auto curTimeMs = std::max<i64>(totalTime + (now() - elapsed), 1LL);
+        mb[5] = (unsigned int)curTimeMs;
+        mb[6] = (unsigned int)(curTimeMs > 0 ? (curTotalNodes * 1000 / curTimeMs) : 0);
+        mb[7] = (unsigned int)Stockfish::Eval::NNUE::get_accel_status();
+    });
 
     engine.set_on_start([&elapsed, &nodesSearched]() {
-        elapsed       = Time::now();
+        elapsed       = now();
         nodesSearched = 0;
     });
 
     engine.set_on_bestmove(
       [&totalTime, &elapsed, &nodes, &nodesSearched](const auto&, const auto&) {
-          totalTime += Time::now() - elapsed;
-          nodes += nodesSearched;
       });
 
     for (const auto& cmd : setup.commands)
@@ -418,15 +429,35 @@ void UCIEngine::benchmark(std::istream& args) {
         if (token == "go")
         {
             // One new line is produced by the search, so omit it here
-            std::cerr << "\rPosition " << cnt++ << '/' << numGoCommands;
+            std::cerr << "\rPosition " << cnt << '/' << numGoCommands;
 
             Search::LimitsType limits = parse_limits(is);
+
+            u64 startNodes = engine.nodes_searched();
+            TimePoint startTime = now();
 
             // Run with silenced network verification
             engine.go(limits);
             engine.wait_for_search_finished();
 
+            TimePoint endTime = now();
+            totalTime += (endTime - startTime);
+            u64 deltaNodes = engine.nodes_searched() - startNodes;
+            nodes += deltaNodes;
+
             updateHashfullReadings();
+
+            volatile unsigned int* mb = (volatile unsigned int*)MAILBOX_ADDR;
+            const auto curTimeMs = std::max<i64>(totalTime, 1LL);
+            mb[0] = 0x53504544; // 'SPED'
+            mb[1] = (unsigned int)cnt;
+            mb[2] = (unsigned int)numGoCommands;
+            mb[3] = (unsigned int)(nodes & 0xFFFFFFFF);
+            mb[4] = (unsigned int)(nodes >> 32);
+            mb[5] = (unsigned int)curTimeMs;
+            mb[6] = (unsigned int)(curTimeMs > 0 ? (nodes * 1000 / curTimeMs) : 0);
+            mb[7] = (unsigned int)Stockfish::Eval::NNUE::get_accel_status();
+            cnt++;
         }
         else if (token == "position")
             position(is);
@@ -437,7 +468,17 @@ void UCIEngine::benchmark(std::istream& args) {
     }
 
     // Ensure positivity to avoid a 'divide by zero'
-    const auto totalTimeMs = std::max<i64>(std::chrono::duration_cast<ms>(totalTime).count(), 1LL);
+    const auto totalTimeMs = std::max<i64>(totalTime, 1LL);
+
+    volatile unsigned int* mb = (volatile unsigned int*)MAILBOX_ADDR;
+    mb[0] = 0x444F4E45; // 'DONE'
+    mb[1] = (unsigned int)numGoCommands;
+    mb[2] = (unsigned int)numGoCommands;
+    mb[3] = (unsigned int)(nodes & 0xFFFFFFFF);
+    mb[4] = (unsigned int)(nodes >> 32);
+    mb[5] = (unsigned int)totalTimeMs;
+    mb[6] = (unsigned int)(totalTimeMs > 0 ? (nodes * 1000 / totalTimeMs) : 0);
+    mb[7] = (unsigned int)Stockfish::Eval::NNUE::get_accel_status();
 
     dbg_print();
 
@@ -543,8 +584,8 @@ WinRateParams win_rate_params(const Position& pos) {
     double m = std::clamp(material, 17, 78) / 58.0;
 
     // Return a = p_a(material) and b = p_b(material), see github.com/official-stockfish/WDL_model
-    constexpr double as[] = {-142.72052667, 372.35176398, -340.71073572, 415.23490212};
-    constexpr double bs[] = {5.93832785, 15.61267078, -30.57816876, 69.63866711};
+    constexpr double as[] = {-72.32565836, 185.93832038, -144.58862193, 416.44950446};
+    constexpr double bs[] = {83.86794042, -136.06112997, 69.98820887, 47.62901433};
 
     double a = (((as[0] * m + as[1]) * m + as[2]) * m) + as[3];
     double b = (((bs[0] * m + bs[1]) * m + bs[2]) * m) + bs[3];

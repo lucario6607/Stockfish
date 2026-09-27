@@ -23,7 +23,6 @@
 #include <cmath>
 #include <cstdlib>
 #include <deque>
-#include <iostream>
 #include <map>
 #include <memory>
 #include <string>
@@ -44,107 +43,94 @@
 
 namespace Stockfish {
 
-// Constructor launches the thread and waits until it goes to sleep
-// in idle_loop(). Note that 'searching' and 'exit' should be already set.
-Thread::Thread(Search::SharedState&                   sharedState,
-               std::unique_ptr<Search::SearchManager> sm,
-               usize                                  n,
-               usize                                  numaN,
-               usize                                  totalNumaCount,
-               OptionalThreadToNumaNodeBinder         binder) :
+// Synchronous single-threaded implementation for bare-metal SPARC
+Thread::Thread(Search::SharedState&                    sharedState,
+               std::unique_ptr<Search::ISearchManager> sm,
+               usize                                   n,
+               usize                                   numaN,
+               usize                                   totalNumaCount,
+               OptionalThreadToNumaNodeBinder          binder) :
     idx(n),
     idxInNuma(numaN),
     totalNuma(totalNumaCount),
     nthreads(sharedState.options["Threads"]),
-    stdThread(
-      create_native_thread(NativeThreadOptions{}.setLargeStack(true), &Thread::idle_loop, this)) {
+    exit(false),
+    searching(false) {
 
-    if (!stdThread.joinable())
-    {
-        std::cerr << "Failed to create search thread\n";
-        std::exit(EXIT_FAILURE);
-    }
-
-    wait_for_search_finished();
-
-    run_custom_job([this, &binder, &sharedState, &sm, n]() {
-        // Use the binder to [maybe] bind the threads to a NUMA node before doing
-        // the Worker allocation. Ideally we would also allocate the SearchManager
-        // here, but that's minor.
-        this->numaAccessToken = binder();
-        this->worker          = make_unique_large_page<Search::Worker>(
-          sharedState, std::move(sm), n, idxInNuma, totalNuma, this->numaAccessToken);
-    });
-
-    wait_for_search_finished();
+    volatile uint32_t* mb = (volatile uint32_t*)MAILBOX_ADDR;
+    mb[1] = 0x351;
+    this->numaAccessToken = binder();
+    mb[1] = 0x352;
+    this->worker          = make_unique_large_page<Search::Worker>(
+      sharedState, std::move(sm), n, idxInNuma, totalNuma, this->numaAccessToken);
+    mb[1] = 0x353;
 }
 
-
-// Destructor wakes up the thread in idle_loop() and waits
-// for its termination. Thread should be already waiting.
 Thread::~Thread() {
-
-    assert(!searching);
-
-    exit = true;
-    start_searching();
-    stdThread.join();
+    worker.reset();
 }
 
-// Wakes up the thread that will start the search
-void Thread::start_searching() {
-    assert(worker != nullptr);
-    run_custom_job([this]() { worker->start_searching(); });
-}
-
-// Clears the histories for the thread worker (usually before a new game)
-void Thread::clear_worker() {
-    assert(worker != nullptr);
-    run_custom_job([this]() { worker->clear(); });
-}
-
-// Blocks on the condition variable until the thread has finished searching
-void Thread::wait_for_search_finished() {
-
-    std::unique_lock<std::mutex> lk(mutex);
-    cv.wait(lk, [&] { return !searching; });
-}
-
-// Launching a function in the thread
-void Thread::run_custom_job(std::function<void()> f) {
-    {
-        std::unique_lock<std::mutex> lk(mutex);
-        cv.wait(lk, [&] { return !searching; });
-        jobFunc   = std::move(f);
-        searching = true;
+extern "C" void hart1_search_trampoline(void* arg) {
+    Search::Worker* w = (Search::Worker*)arg;
+    if (w != nullptr) {
+        w->start_searching();
     }
-    cv.notify_one();
+#if defined(BAREMETAL_RISCV)
+    *HW_H1_DONE_REG = 1;
+#endif
 }
 
-void Thread::ensure_network_replicated() { worker->ensure_network_replicated(); }
+void Thread::start_searching() {
+    if (worker == nullptr) return;
 
-// Thread gets parked here, blocked on the condition variable
-// when the thread has no work to do.
+    if (idx == 0) {
+        worker->start_searching();
+    } else if (idx == 1) {
+#if defined(BAREMETAL_RISCV)
+        *HW_H1_STOP_REG = 0;
+        *HW_H1_DONE_REG = 0;
+#endif
+        // Dispatch to Hart 1 via mailbox 0x1FF00020
+        volatile uint32_t* h1_box = (volatile uint32_t*)0x1FF00020;
+        h1_box[3] = 0; // Clear stop flag
+        h1_box[2] = (uint32_t)(uintptr_t)worker.get(); // argument a0 = worker pointer
+        h1_box[0] = (uint32_t)(uintptr_t)hart1_search_trampoline; // entry point triggers Hart 1
+        asm volatile(
+            "cbo.flush (%0)\n"
+            "fence rw, rw\n"
+            : : "r"(h1_box) : "memory"
+        );
+    }
+}
+
+void Thread::clear_worker() {
+    if (worker != nullptr)
+        worker->clear();
+}
+
+void Thread::wait_for_search_finished() {
+    if (idx == 1) {
+#if defined(BAREMETAL_RISCV)
+        *HW_H1_STOP_REG = 1;
+        // Wait until Hart 1 finishes
+        while (*HW_H1_DONE_REG == 0) {
+            for (volatile int d = 0; d < 100; ++d) {}
+        }
+#endif
+    }
+}
+
+void Thread::run_custom_job(std::function<void()> f) {
+    if (f)
+        f();
+}
+
+void Thread::ensure_network_replicated() {
+    if (worker != nullptr)
+        worker->ensure_network_replicated();
+}
 
 void Thread::idle_loop() {
-    while (true)
-    {
-        std::unique_lock<std::mutex> lk(mutex);
-        searching = false;
-        cv.notify_one();  // Wake up anyone waiting for search finished
-        cv.wait(lk, [&] { return searching; });
-
-        if (exit)
-            return;
-
-        std::function<void()> job = std::move(jobFunc);
-        jobFunc                   = nullptr;
-
-        lk.unlock();
-
-        if (job)
-            job();
-    }
 }
 
 Search::SearchManager* ThreadPool::main_manager() { return main_thread()->worker->main_manager(); }
@@ -155,110 +141,47 @@ u64 ThreadPool::tb_hits() const { return accumulate(&Search::Worker::tbHits); }
 static usize next_power_of_two(u64 count) { return count > 1 ? (2ULL << msb(count - 1)) : 1; }
 
 // Creates/destroys threads to match the requested number.
-// Created and launched threads will immediately go to sleep in idle_loop.
-// Upon resizing, threads are recreated to allow for binding if necessary.
 void ThreadPool::set(const NumaConfig&                           numaConfig,
                      Search::SharedState                         sharedState,
                      const Search::SearchManager::UpdateContext& updateContext) {
 
-    if (threads.size() > 0)  // destroy any existing thread(s)
-    {
-        main_thread()->wait_for_search_finished();
-
-        threads.clear();
-
-        boundThreadToNumaNode.clear();
+    volatile uint32_t* mb = (volatile uint32_t*)MAILBOX_ADDR;
+    const usize requested = sharedState.options["Threads"];
+    if (threads.size() == requested && requested > 0) {
+        mb[1] = 0x3506;
+        clear();
+        return;
     }
 
-    const usize requested = sharedState.options["Threads"];
+    threads.clear();
+    boundThreadToNumaNode.clear();
 
-    if (requested > 0)  // create new thread(s)
+    if (requested > 0)
     {
-        // Binding threads may be problematic when there's multiple NUMA nodes and
-        // multiple Stockfish instances running. In particular, if each instance
-        // runs a single thread then they would all be mapped to the first NUMA node.
-        // This is undesirable, and so the default behaviour (i.e. when the user does not
-        // change the NumaConfig UCI setting) is to not bind the threads to processors
-        // unless we know for sure that we span NUMA nodes and replication is required.
-        const std::string numaPolicy(sharedState.options["NumaPolicy"]);
-        const bool        doBindThreads = [&]() {
-            if (numaPolicy == "none")
-                return false;
-
-            if (numaPolicy == "auto")
-                return numaConfig.suggests_binding_threads(requested);
-
-            // numaPolicy == "system", or explicitly set by the user
-            return true;
-        }();
-
-        std::map<NumaIndex, usize> counts;
-        boundThreadToNumaNode = doBindThreads
-                                ? numaConfig.distribute_threads_among_numa_nodes(requested)
-                                : std::vector<NumaIndex>{};
-
-        if (boundThreadToNumaNode.empty())
-            counts[0] = requested;  // Pretend all threads are part of numa node 0
-        else
-        {
-            for (usize i = 0; i < boundThreadToNumaNode.size(); ++i)
-                counts[boundThreadToNumaNode[i]]++;
-        }
-
+        mb[1] = 0x3502;
         sharedState.sharedHistories.clear();
-        for (auto pair : counts)
-        {
-            NumaIndex numaIndex = pair.first;
-            u64       count     = pair.second;
-            auto      f         = [&]() {
-                sharedState.sharedHistories.try_emplace(numaIndex, next_power_of_two(count));
-            };
-            if (doBindThreads)
-                numaConfig.execute_on_numa_node(numaIndex, f);
-            else
-                f();
+        sharedState.sharedHistories.try_emplace(0, next_power_of_two(requested));
+
+        mb[1] = 0x3503;
+        auto binder = OptionalThreadToNumaNodeBinder(0);
+
+        for (usize i = 0; i < requested && i < 2; ++i) {
+            auto manager = std::make_unique<Search::SearchManager>(updateContext);
+            threads.emplace_back(std::make_unique<Thread>(
+                sharedState, std::move(manager), i, i, requested, binder));
         }
 
-        auto threadsPerNode = counts;
-        counts.clear();
-
-        while (threads.size() < requested)
-        {
-            const usize     threadId      = threads.size();
-            const NumaIndex numaId        = doBindThreads ? boundThreadToNumaNode[threadId] : 0;
-            auto            create_thread = [&]() {
-                auto manager =
-                  threadId == 0 ? std::make_unique<Search::SearchManager>(updateContext) : nullptr;
-
-                // When not binding threads we want to force all access to happen
-                // from the same NUMA node, because in case of NUMA replicated memory
-                // accesses we don't want to trash cache in case the threads get scheduled
-                // on the same NUMA node.
-                auto binder = doBindThreads ? OptionalThreadToNumaNodeBinder(numaConfig, numaId)
-                                                       : OptionalThreadToNumaNodeBinder(numaId);
-
-                threads.emplace_back(std::make_unique<Thread>(sharedState, std::move(manager),
-                                                                         threadId, counts[numaId]++,
-                                                                         threadsPerNode[numaId], binder));
-            };
-
-            // Ensure the worker thread inherits the intended NUMA affinity at creation.
-            if (doBindThreads)
-                numaConfig.execute_on_numa_node(numaId, create_thread);
-            else
-                create_thread();
-        }
-
+        mb[1] = 0x3505;
         clear();
-
-        main_thread()->wait_for_search_finished();
+        mb[1] = 0x3506;
     }
 }
 
 
+
 // Sets threadPool data to initial values
 void ThreadPool::clear() {
-    if (threads.empty())
+    if (threads.size() == 0)
         return;
 
     for (auto&& th : threads)
@@ -300,6 +223,9 @@ void ThreadPool::start_thinking(const OptionsMap&  options,
     main_thread()->wait_for_search_finished();
 
     main_manager()->stopOnPonderhit = stop = false;
+#if defined(BAREMETAL_RISCV)
+    asm volatile("cbo.flush (%0)\nfence rw, rw" : : "r"(&stop) : "memory");
+#endif
     main_manager()->ponder                 = limits.ponderMode;
 
     increaseDepth = true;
@@ -378,10 +304,10 @@ Thread* ThreadPool::get_best_thread() const {
         // Aborted (d1) searches may lead to inexact win (or loss) scores.
         const bool bestThreadDecisive = bestThreadMove.score != -VALUE_INFINITE
                                      && is_decisive(bestThreadMove.score)
-                                     && !bestThreadMove.is_inexact();
+                                     && !bestThreadMove.score_is_bound();
         const bool newThreadDecisive = newThreadMove.score != -VALUE_INFINITE
                                     && is_decisive(newThreadMove.score)
-                                    && !newThreadMove.is_inexact();
+                                    && !newThreadMove.score_is_bound();
 
         if (bestThreadDecisive)
         {
