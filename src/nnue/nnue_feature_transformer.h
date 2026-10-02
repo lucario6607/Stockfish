@@ -89,8 +89,10 @@ class FeatureTransformer {
     static constexpr IndexType ThreatInputDimensions = ThreatFeatureSet::Dimensions;
     static constexpr IndexType PairInputDimensions   = PairFeatureSet::Dimensions;
     static constexpr IndexType PsqDimensions         = PSQFeatureSet::Dimensions;
+    static constexpr IndexType MaterialDimensions    = MaterialFeatureSet::Dimensions;
     static constexpr IndexType ThreatAndPpDimensions = ThreatInputDimensions + PairInputDimensions;
-    static constexpr IndexType InputDimensions       = PsqDimensions + ThreatAndPpDimensions;
+    static constexpr IndexType InputDimensions =
+      PsqDimensions + ThreatAndPpDimensions + MaterialDimensions;
     static constexpr IndexType OutputDimensions      = HalfDimensions;
     static constexpr IndexType ThreatWeightSize      = ThreatInputDimensions * HalfDimensions;
     static constexpr IndexType PairWeightSize        = PairInputDimensions * HalfDimensions;
@@ -98,6 +100,7 @@ class FeatureTransformer {
 
     using BiasesArray            = std::array<BiasType, HalfDimensions>;
     using WeightArray            = std::array<WeightType, HalfDimensions * PsqDimensions>;
+    using MaterialWeightArray    = std::array<WeightType, HalfDimensions * MaterialDimensions>;
     using ThreatAndPpWeightArray = std::array<ThreatWeightType, ThreatAndPpWeightSize>;
 
     // Size of forward propagation buffer
@@ -137,15 +140,18 @@ class FeatureTransformer {
     }
 
     // Hash value embedded in the evaluation file
-    static constexpr u32 get_hash_value() {
-        return combine_hash(
-                 {ThreatFeatureSet::HashValue, PairFeatureSet::HashValue, PSQFeatureSet::HashValue})
-             ^ (OutputDimensions * 2);
+    static constexpr u32 get_hash_value(bool withMaterial = true) {
+        u32 hash = combine_hash(
+          {ThreatFeatureSet::HashValue, PairFeatureSet::HashValue, PSQFeatureSet::HashValue});
+        if (withMaterial)
+            hash = combine_hash({hash, MaterialFeatureSet::HashValue});
+        return hash ^ (OutputDimensions * 2);
     }
 
     void permute_weights() {
         permute<16>(biases, PackusEpi16Order);
         permute<16>(weights, PackusEpi16Order);
+        permute<16>(materialWeights, PackusEpi16Order);
 
         permute<8>(threatAndPpWeights, PackusEpi16Order);
     }
@@ -153,6 +159,7 @@ class FeatureTransformer {
     void unpermute_weights() {
         permute<16>(biases, InversePackusEpi16Order);
         permute<16>(weights, InversePackusEpi16Order);
+        permute<16>(materialWeights, InversePackusEpi16Order);
         permute<8>(threatAndPpWeights, InversePackusEpi16Order);
     }
 
@@ -160,13 +167,18 @@ class FeatureTransformer {
     ThreatWeightType* pawnPairWeightData() { return threatWeightData() + ThreatWeightSize; }
 
     // Read network parameters
-    bool read_parameters(std::istream& stream) {
+    bool read_parameters(std::istream& stream, bool withMaterial = true) {
         read_leb_128(stream, biases);
 
         read_little_endian(stream, threatWeightData(), ThreatWeightSize);
         read_little_endian(stream, pawnPairWeightData(), PairWeightSize);
 
         read_leb_128(stream, weights);
+
+        if (withMaterial)
+            read_leb_128(stream, materialWeights);
+        else
+            materialWeights.fill(0);
 
         permute_weights();
 
@@ -185,6 +197,7 @@ class FeatureTransformer {
         write_little_endian(stream, copy->pawnPairWeightData(), PairWeightSize);
 
         write_leb_128<WeightType>(stream, copy->weights);
+        write_leb_128<WeightType>(stream, copy->materialWeights);
 
         return !stream.fail();
     }
@@ -194,6 +207,7 @@ class FeatureTransformer {
 
         hash_combine(h, get_raw_data_hash(biases));
         hash_combine(h, get_raw_data_hash(weights));
+        hash_combine(h, get_raw_data_hash(materialWeights));
 
         hash_combine(h, get_raw_data_hash(threatAndPpWeights));
 
@@ -392,6 +406,7 @@ class FeatureTransformer {
    public:
     alignas(CacheLineSize) BiasesArray biases;
     alignas(CacheLineSize) WeightArray weights;
+    alignas(CacheLineSize) MaterialWeightArray materialWeights;
 
     // Threats and pawn-pair features are concatenated into one array to allow for a single index to address either.
     // The first pawn-pair feature is at index ThreatFeatureSet::Dimensions.

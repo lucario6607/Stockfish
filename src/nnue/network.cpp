@@ -336,9 +336,11 @@ bool Network::read_parameters(std::istream& stream, std::string& netDescription)
     u32 hashValue;
     if (!read_header(stream, &hashValue, &netDescription))
         return false;
-    if (hashValue != Network::hash)
+    const bool withMaterial = hashValue == Network::hash;
+    if (!withMaterial && hashValue != Network::hashWithoutMaterial)
         return false;
-    if (!Detail::read_parameters(stream, featureTransformer))
+    if (read_little_endian<u32>(stream) != FeatureTransformer::get_hash_value(withMaterial)
+        || !featureTransformer.read_parameters(stream, withMaterial))
         return false;
     for (usize i = 0; i < LayerStacks; ++i)
     {

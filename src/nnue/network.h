@@ -101,6 +101,8 @@ class Network {
     // Hash value of evaluation function structure
     static constexpr u32 hash =
       FeatureTransformer::get_hash_value() ^ NetworkArchitecture::get_hash_value();
+    static constexpr u32 hashWithoutMaterial =
+      FeatureTransformer::get_hash_value(false) ^ NetworkArchitecture::get_hash_value();
 
     friend struct AccumulatorCaches;
 };

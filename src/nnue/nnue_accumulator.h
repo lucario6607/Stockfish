@@ -43,6 +43,7 @@ class FeatureTransformer;
 struct alignas(CacheLineSize) Accumulator {
     std::array<std::array<i16, L1>, COLOR_NB> accumulation;
     std::array<bool, COLOR_NB>                computed = {};
+    MaterialFeatureSet::Signature             material = 0;
 };
 
 

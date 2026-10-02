@@ -410,14 +410,26 @@ sf_always_inline Tile apply_psq_features(IndexType                       j,
     return acc;
 }
 
-void apply_combined(Color                              perspective,
-                    const FeatureTransformer&          featureTransformer,
-                    const AccumulatorState&            from,
-                    AccumulatorState&                  to,
-                    const PSQFeatureSet::IndexList&    psqAdded,
-                    const PSQFeatureSet::IndexList&    psqRemoved,
-                    const ThreatFeatureSet::IndexList& thrAdded,
-                    const ThreatFeatureSet::IndexList& thrRemoved) {
+template<int sign>
+sf_always_inline Tile apply_material_features(IndexType                            j,
+                                              Tile                                 acc,
+                                              const MaterialFeatureSet::IndexList& list,
+                                              const FeatureTransformer&            ft) {
+    for (int i = 0; i < list.ssize(); ++i)
+        acc = apply<sign>(j, acc, &ft.materialWeights[list[i] * Dimensions]);
+    return acc;
+}
+
+void apply_combined(Color                                perspective,
+                    const FeatureTransformer&            featureTransformer,
+                    const AccumulatorState&              from,
+                    AccumulatorState&                    to,
+                    const PSQFeatureSet::IndexList&      psqAdded,
+                    const PSQFeatureSet::IndexList&      psqRemoved,
+                    const ThreatFeatureSet::IndexList&   thrAdded,
+                    const ThreatFeatureSet::IndexList&   thrRemoved,
+                    const MaterialFeatureSet::IndexList& matAdded,
+                    const MaterialFeatureSet::IndexList& matRemoved) {
 
     const auto& fromAcc = from.accumulation[perspective];
     auto&       toAcc   = to.accumulation[perspective];
@@ -433,6 +445,9 @@ void apply_combined(Color                              perspective,
 
         acc = apply_threat_features<-1>(j, acc, thrRemoved, featureTransformer);
         acc = apply_threat_features<+1>(j, acc, thrAdded, featureTransformer);
+
+        acc = apply_material_features<-1>(j, acc, matRemoved, featureTransformer);
+        acc = apply_material_features<+1>(j, acc, matAdded, featureTransformer);
 
         store_tile(j, toAcc.data(), acc);
     }
@@ -480,8 +495,13 @@ void update_accumulator_incremental(Color                     perspective,
         PSQFeatureSet::append_changed_indices(perspective, ksq, dirtyPiece, psqAdded, psqRemoved);
     }
 
+    MaterialFeatureSet::IndexList matRemoved, matAdded;
+    target_state.material = MaterialFeatureSet::update(computed.material, dirtyPiece, Forward);
+    MaterialFeatureSet::append_changed_indices(perspective, computed.material,
+                                               target_state.material, matRemoved, matAdded);
+
     apply_combined(perspective, featureTransformer, computed, target_state, psqAdded, psqRemoved,
-                   thrAdded, thrRemoved);
+                   thrAdded, thrRemoved, matAdded, matRemoved);
 
     target_state.computed[perspective] = true;
 }
@@ -514,10 +534,19 @@ void update_accumulator_incremental_both(const FeatureTransformer& featureTransf
     PSQFeatureSet::append_changed_indices(BLACK, black_ksq, target_state.dirtyPiece,
                                           psq_removed[BLACK], psq_added[BLACK]);
 
+    MaterialFeatureSet::IndexList mat_removed[COLOR_NB], mat_added[COLOR_NB];
+    target_state.material =
+      MaterialFeatureSet::update(computed.material, target_state.dirtyPiece, true);
+    for (Color c : {WHITE, BLACK})
+        MaterialFeatureSet::append_changed_indices(c, computed.material, target_state.material,
+                                                   mat_removed[c], mat_added[c]);
+
     apply_combined(WHITE, featureTransformer, computed, target_state, psq_added[WHITE],
-                   psq_removed[WHITE], thr_added[WHITE], thr_removed[WHITE]);
+                   psq_removed[WHITE], thr_added[WHITE], thr_removed[WHITE], mat_added[WHITE],
+                   mat_removed[WHITE]);
     apply_combined(BLACK, featureTransformer, computed, target_state, psq_added[BLACK],
-                   psq_removed[BLACK], thr_added[BLACK], thr_removed[BLACK]);
+                   psq_removed[BLACK], thr_added[BLACK], thr_removed[BLACK], mat_added[BLACK],
+                   mat_removed[BLACK]);
 
     target_state.computed[WHITE] = true;
     target_state.computed[BLACK] = true;
@@ -721,6 +750,11 @@ void update_accumulator_hybrid(Color                     perspective,
     PairFeatureSet::append_changed_indices(perspective, newKsq, target.dirtyPawnPairs, thrRemoved,
                                            thrAdded, threatPpBase, pfStride);
 
+    MaterialFeatureSet::IndexList matRemoved, matAdded;
+    target.material = MaterialFeatureSet::update(computed.material, dirtyPiece, true);
+    MaterialFeatureSet::append_changed_indices(perspective, computed.material, target.material,
+                                               matRemoved, matAdded);
+
     const auto& fromAcc = computed.accumulation[perspective];
     auto&       toAcc   = target.accumulation[perspective];
 
@@ -748,6 +782,9 @@ void update_accumulator_hybrid(Color                     perspective,
 
         acc = apply_threat_features<-1>(j, acc, thrRemoved, featureTransformer);
         acc = apply_threat_features<+1>(j, acc, thrAdded, featureTransformer);
+
+        acc = apply_material_features<-1>(j, acc, matRemoved, featureTransformer);
+        acc = apply_material_features<+1>(j, acc, matAdded, featureTransformer);
 
         store_tile(j, toAcc.data(), acc);
     }
@@ -797,6 +834,10 @@ void update_accumulator_refresh_cache(Color                     perspective,
     ThreatFeatureSet::append_active_indices(perspective, pos, active);
     PairFeatureSet::append_active_indices(perspective, pos, active);
 
+    MaterialFeatureSet::IndexList materialActive;
+    accumulator.material = MaterialFeatureSet::signature(pos);
+    MaterialFeatureSet::append_active_indices(perspective, accumulator.material, materialActive);
+
     accumulator.computed[perspective] = true;
 
     Tile acc;
@@ -811,6 +852,7 @@ void update_accumulator_refresh_cache(Color                     perspective,
         store_tile(j, &entry.accumulation[0], acc);
 
         acc = apply_threat_features<+1>(j, acc, active, featureTransformer);
+        acc = apply_material_features<+1>(j, acc, materialActive, featureTransformer);
 
         store_tile(j, accumulator.accumulation[perspective].data(), acc);
     }
