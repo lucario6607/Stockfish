@@ -19,16 +19,16 @@
 #ifndef NETWORK_H_INCLUDED
 #define NETWORK_H_INCLUDED
 
+#include <filesystem>
 #include <functional>
 #include <iostream>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <filesystem>
 
-#include "../types.h"
 #include "../misc.h"
+#include "../types.h"
 #include "nnue_architecture.h"
 #include "nnue_feature_transformer.h"
 #include "nnue_misc.h"
