@@ -125,13 +125,13 @@ void AccumulatorStack::evaluate_side(Color                     perspective,
     {
         const auto& dirtyPiece = latest().dirtyPiece;
 
-        if (dirtyPiece.pc == make_piece(perspective, KING)
-            && dirtyPiece.remove_pc != make_piece(~perspective, QUEEN)
-            && accumulators[size - 2].computed[perspective]
+        const bool kingMove = dirtyPiece.pc == make_piece(perspective, KING);
+
+        if (size > 1 && accumulators[size - 2].computed[perspective]
             && pos.count<ALL_PIECES>() >= MIN_PC_COUNT_HYBRID
-            && ((int(dirtyPiece.from) & 0b100) == (int(dirtyPiece.to) & 0b100))
-            && dirtyPiece.add_sq == SQ_NONE  // excludes castling
-        )
+            && (!kingMove
+                || (((int(dirtyPiece.from) & 0b100) == (int(dirtyPiece.to) & 0b100))
+                    && dirtyPiece.add_sq == SQ_NONE)))
         {
             update_accumulator_hybrid(perspective, pos, featureTransformer, mut_latest(),
                                       accumulators[size - 2], cache);
@@ -632,8 +632,8 @@ Bitboard get_changed_pieces(const std::array<Piece, SQUARE_NB>& oldPieces,
 #endif
 }
 
-// Updates accumulator for a king move, and also updates the accumulator cache
-// for the new king position.
+// Updates accumulator for a move that changes the king bucket or the opponent's
+// queen presence, and also updates the accumulator cache for the new position.
 void update_accumulator_hybrid(Color                     perspective,
                                const Position&           pos,
                                const FeatureTransformer& featureTransformer,
@@ -642,41 +642,53 @@ void update_accumulator_hybrid(Color                     perspective,
                                AccumulatorCaches&        cache) {
     const auto& dirtyPiece = target.dirtyPiece;
 
-    assert(dirtyPiece.pc == make_piece(perspective, KING));
-    assert(dirtyPiece.to != SQ_NONE);
-    assert((int(dirtyPiece.from) & 0b100) == (int(dirtyPiece.to) & 0b100));
     assert(computed.computed[perspective]);
     assert(!target.computed[perspective]);
 
-    const Square oldKsq = dirtyPiece.from;
-    const Square newKsq = dirtyPiece.to;
-    assert(oldKsq != newKsq);
+    const bool   kingMove = dirtyPiece.pc == make_piece(perspective, KING);
+    const Square newKsq   = pos.square<KING>(perspective);
+    const Square oldKsq   = kingMove ? dirtyPiece.from : newKsq;
 
     const auto& currentPieces  = pos.piece_array();
     auto        previousPieces = currentPieces;  // copies 64 bytes!
 
     Bitboard previousPieceBB = pos.pieces();
 
-    assert(previousPieces[newKsq] == dirtyPiece.pc);
-
+    if (dirtyPiece.add_sq != SQ_NONE)
+    {
+        previousPieces[dirtyPiece.add_sq] = NO_PIECE;
+        previousPieceBB &= ~square_bb(dirtyPiece.add_sq);
+    }
+    if (dirtyPiece.to != SQ_NONE)
+    {
+        previousPieces[dirtyPiece.to] = NO_PIECE;
+        previousPieceBB &= ~square_bb(dirtyPiece.to);
+    }
     if (dirtyPiece.remove_sq != SQ_NONE)
     {
-        assert(dirtyPiece.remove_sq == newKsq);
-        previousPieces[newKsq] = dirtyPiece.remove_pc;
+        previousPieces[dirtyPiece.remove_sq] = dirtyPiece.remove_pc;
+        previousPieceBB |= square_bb(dirtyPiece.remove_sq);
     }
-    else
+    previousPieces[dirtyPiece.from] = dirtyPiece.pc;
+    previousPieceBB |= square_bb(dirtyPiece.from);
+
+    const Piece theirQueen = make_piece(~perspective, QUEEN);
+    const int   queensNow  = pos.count<QUEEN>(~perspective);
+    const int   queensThen = queensNow
+                         + (dirtyPiece.remove_sq != SQ_NONE && dirtyPiece.remove_pc == theirQueen)
+                         - (dirtyPiece.add_sq != SQ_NONE && dirtyPiece.add_pc == theirQueen);
+    const bool newHasQueen = queensNow > 0;
+    const bool oldHasQueen = queensThen > 0;
+
+    if (!kingMove && oldHasQueen == newHasQueen)
     {
-        previousPieces[newKsq] = NO_PIECE;
-        previousPieceBB &= ~square_bb(newKsq);
+        update_accumulator_incremental<true>(perspective, featureTransformer, newKsq, newHasQueen,
+                                             target, computed);
+        return;
     }
 
-    assert(previousPieces[oldKsq] == NO_PIECE);
-    previousPieces[oldKsq] = make_piece(perspective, KING);
-    previousPieceBB |= square_bb(oldKsq);
-
-    const bool  opponent_has_queen = bool(pos.pieces(~perspective, QUEEN));
-    const auto& oldEntry           = cache[opponent_has_queen][oldKsq][perspective];
-    auto&       newEntry           = cache[opponent_has_queen][newKsq][perspective];
+    const auto& oldEntry = cache[oldHasQueen][oldKsq][perspective];
+    auto&       newEntry = cache[newHasQueen][newKsq][perspective];
 
     // "Remove" means we need to remove them from the cache entry,
     // "Add" means add them to the entry to get the accumulator we want
@@ -692,31 +704,33 @@ void update_accumulator_hybrid(Color                     perspective,
 
 #if defined(USE_AVX512ICL)
     PSQFeatureSet::write_indices(oldEntry.pieces, previousPieces, oldRemovedBB, oldAddedBB,
-                                 perspective, oldKsq, opponent_has_queen, oldRemove, oldAdd);
+                                 perspective, oldKsq, oldHasQueen, oldRemove, oldAdd);
     PSQFeatureSet::write_indices(newEntry.pieces, currentPieces, newRemovedBB, newAddedBB,
-                                 perspective, newKsq, opponent_has_queen, newRemove, newAdd);
+                                 perspective, newKsq, newHasQueen, newRemove, newAdd);
 #else
     while (oldRemovedBB)
     {
         Square sq = pop_lsb(oldRemovedBB);
         oldRemove.push_back(
-          PSQFeatureSet::make_index(perspective, sq, oldEntry.pieces[sq], oldKsq, opponent_has_queen));
+          PSQFeatureSet::make_index(perspective, sq, oldEntry.pieces[sq], oldKsq, oldHasQueen));
     }
     while (oldAddedBB)
     {
         Square sq = pop_lsb(oldAddedBB);
-        oldAdd.push_back(PSQFeatureSet::make_index(perspective, sq, previousPieces[sq], oldKsq, opponent_has_queen));
+        oldAdd.push_back(
+          PSQFeatureSet::make_index(perspective, sq, previousPieces[sq], oldKsq, oldHasQueen));
     }
     while (newRemovedBB)
     {
         Square sq = pop_lsb(newRemovedBB);
         newRemove.push_back(
-          PSQFeatureSet::make_index(perspective, sq, newEntry.pieces[sq], newKsq, opponent_has_queen));
+          PSQFeatureSet::make_index(perspective, sq, newEntry.pieces[sq], newKsq, newHasQueen));
     }
     while (newAddedBB)
     {
         Square sq = pop_lsb(newAddedBB);
-        newAdd.push_back(PSQFeatureSet::make_index(perspective, sq, currentPieces[sq], newKsq, opponent_has_queen));
+        newAdd.push_back(
+          PSQFeatureSet::make_index(perspective, sq, currentPieces[sq], newKsq, newHasQueen));
     }
 #endif
 
@@ -744,9 +758,9 @@ void update_accumulator_hybrid(Color                     perspective,
 
         // adding the old accumulator adds (most of) the threats and pp weights that we need
         acc = apply<1>(j, acc, fromAcc.data());
-        // But we have added a whole bunch of psq weights for the wrong king bucket which
-        // we need to remove
-        // first we remove the cached psq accumulation for the old king position...
+        // But we have added a whole bunch of psq weights for the old king bucket and queen
+        // state which we need to remove
+        // first we remove the cached psq accumulation for the old position...
         acc = apply<-1>(j, acc, oldEntry.accumulation.data());
 
         // ... then we adjust
